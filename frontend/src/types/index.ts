@@ -10,6 +10,7 @@ export interface MeResponse {
 export interface InsumoResponse {
   cpd: string;
   descricao: string | null;
+  codigo_fabricante: string | null;
   subgrupo: string | null;
   estoque_almoxarifado: number;
   estoque_minimo: number;   // 0 = sem cadastro
@@ -27,14 +28,26 @@ export interface InsumoResponse {
 export interface DrilldownItem {
   cpd_materia_prima: string;
   descricao: string | null;
+  codigo_fabricante: string | null;
   ops_pendentes: number;
+  produzido_raw: number;
+  janela_meses: number;
   consumo_mensal_ferramenta: number;
+  consumo_historico_mensal: number;
+  consumo_pendente_mensal: number;
 }
 
 export interface FerramentaResponse {
   cpd_ferramenta: string;
   descricao: string | null;
+  codigo_fabricante: string | null;
   consumo_mensal: number;
+  consumo_historico_mensal: number;
+  consumo_pendente_mensal: number;
+  janela_meses: number;
+  janela_dias: number;
+  produzido_total: number;
+  pendente_total: number;
   consumo_total: number;
   estoque_atual: number;
   estoque_minimo_calculado: number;
@@ -43,8 +56,32 @@ export interface FerramentaResponse {
   criticidade: "alta" | "media" | "baixa";
   moq: number;
   leadtime_semanas: number;
+  leadtime_meses_calc: number;
+  cobertura_meses: number;
+  usa_cobertura_padrao: boolean;
+  aplicacoes: number;
+  consumo_ferramenta_mensal: number;
+  num_terminais: number;
   razao_social_fornecedor: string | null;
   unidade: string | null;
+}
+
+export interface SemFerramentaItem {
+  cpd_materia_prima:        string;
+  codigo_fabricante:        string | null;
+  subgrupo:                 string | null;
+  consumo_mensal:           number;
+  consumo_historico_mensal: number;
+  consumo_pendente_mensal:  number;
+  produzido_total:          number;
+  pendente_total:           number;
+  janela_meses:             number;
+}
+
+export interface ConsumoMensalItem {
+  mes_ano: string;
+  produzido: number;
+  pendente: number;
 }
 
 export interface AlertaItem {
@@ -61,6 +98,34 @@ export interface DashboardStats {
   ferramentas_criticas: number;
   ocs_geradas_hoje: number;
   alertas: AlertaItem[];
+}
+
+export interface PreviewItemOC {
+  cpd: string;
+  codigo_fabricante: string | null;
+  descricao: string | null;
+  qtd_sugerida: number;
+  moq: number;
+  unidade: string | null;
+  leadtime_semanas: number;
+  data_entrega: string;
+  data_entrega_ajustada: boolean;
+  sem_leadtime: boolean;
+  estoque_atual: number;
+  estoque_minimo: number;
+  ocs_abertas: number;
+}
+
+export interface PreviewFornecedorOC {
+  razao_social: string;
+  id_fornecedor: number | null;
+  itens: PreviewItemOC[];
+}
+
+export interface PreviewOCResponse {
+  fornecedores: PreviewFornecedorOC[];
+  total_fornecedores: number;
+  total_itens: number;
 }
 
 export interface ItemOrdemCompra {
@@ -112,6 +177,24 @@ export interface EstoqueMinimo {
   updated_at: string;
 }
 
+export interface ConfigFornecedor {
+  id: number;
+  razao_social: string;
+  leadtime_meses: number;
+  cobertura_meses: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ConfigFerramenta {
+  id: number;
+  cpd_ferramenta: string;
+  aplicacoes: number;
+  leadtime_override: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface CriticidadeFerramenta {
   id: number;
   cpd_ferramenta: string;
@@ -130,4 +213,24 @@ export interface UserProfile {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface DisparoLog {
+  id: number;
+  tipo: "manual" | "agendado";
+  status: "ok" | "erro";
+  email_operacional: string | null;
+  email_gestor: string | null;
+  total_fornecedores: number;
+  total_itens: number;
+  valor_total_brl: number | null;
+  cotacao_usd_brl: number | null;
+  arquivo_nome: string | null;
+  erro_msg: string | null;
+  created_at: string;
+}
+
+export interface DisparoResult {
+  log: DisparoLog;
+  mensagem: string;
 }

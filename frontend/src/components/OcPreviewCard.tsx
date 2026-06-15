@@ -1,8 +1,6 @@
 import { useState, useEffect } from "react";
-import { OrdensCompraService } from "../../services/OrdensCompraService";
-import { LoadingSpinner } from "../../components/LoadingSpinner";
-import { ErrorBoundary } from "../../components/ErrorBoundary";
-import type { PreviewFornecedorOC, PreviewOCResponse } from "../../types";
+import type { PreviewFornecedorOC, PreviewOCResponse } from "../types";
+import { LoadingSpinner } from "./LoadingSpinner";
 
 const fmt = (n: number) =>
   n.toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
@@ -13,7 +11,7 @@ function fmtDate(iso: string): string {
   return `${d}/${m}/${y}`;
 }
 
-function FornecedorCard({
+export function FornecedorCard({
   forn,
   defaultOpen,
 }: {
@@ -92,9 +90,7 @@ function FornecedorCard({
                   <td style={{ textAlign: "right", fontWeight: 600, color: "var(--warning)" }}>
                     {fmt(item.qtd_sugerida)}
                     {item.unidade ? (
-                      <span style={{ color: "var(--muted)", fontSize: "0.75rem", marginLeft: 4 }}>
-                        {item.unidade}
-                      </span>
+                      <span style={{ color: "var(--muted)", fontSize: "0.75rem", marginLeft: 4 }}>{item.unidade}</span>
                     ) : null}
                   </td>
                   <td style={{ textAlign: "right", color: "var(--muted)", fontSize: "0.82rem" }}>
@@ -102,7 +98,17 @@ function FornecedorCard({
                   </td>
                   <td style={{ textAlign: "right", color: "var(--muted)", fontSize: "0.82rem" }}>
                     {fmtDate(item.data_entrega)}
-                    {item.leadtime_semanas > 0 && (
+                    {item.data_entrega_ajustada && (
+                      <span style={{ display: "block", fontSize: "0.68rem", color: "var(--accent)", letterSpacing: "0.02em" }}>
+                        consolidada
+                      </span>
+                    )}
+                    {item.sem_leadtime && (
+                      <span style={{ display: "block", fontSize: "0.68rem", color: "var(--warning)", letterSpacing: "0.02em" }}>
+                        sem LT
+                      </span>
+                    )}
+                    {item.leadtime_semanas > 0 && !item.data_entrega_ajustada && (
                       <span style={{ color: "var(--text-dim)", fontSize: "0.72rem", display: "block" }}>
                         {item.leadtime_semanas}sem
                       </span>
@@ -118,36 +124,41 @@ function FornecedorCard({
   );
 }
 
-function OrdensCompraContent() {
-  const [preview, setPreview] = useState<PreviewOCResponse | null>(null);
-  const [loadingPreview, setLoadingPreview] = useState(true);
-  const [previewError, setPreviewError] = useState<string | null>(null);
+export function OcPreviewTab({
+  getPreview,
+  downloadExcel,
+  titulo,
+}: {
+  getPreview: () => Promise<PreviewOCResponse>;
+  downloadExcel: () => Promise<void>;
+  titulo: string;
+}) {
+  const [preview, setPreview]       = useState<PreviewOCResponse | null>(null);
+  const [loading, setLoading]       = useState(true);
+  const [error, setError]           = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [lastResult, setLastResult] = useState<string | null>(null);
 
-  useEffect(() => {
-    loadPreview();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  function loadPreview() {
-    setLoadingPreview(true);
-    setPreviewError(null);
-    OrdensCompraService.getPreviewInsumos()
+  function load() {
+    setLoading(true);
+    setError(null);
+    getPreview()
       .then(data => setPreview(data))
       .catch((e: unknown) => {
         const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-        setPreviewError(msg || "Erro ao carregar pre-visualizacao.");
+        setError(msg || "Erro ao carregar pre-visualizacao.");
       })
-      .finally(() => setLoadingPreview(false));
+      .finally(() => setLoading(false));
   }
 
-  async function exportarExcel() {
+  async function exportar() {
     setDownloading(true);
     setLastResult(null);
     try {
-      await OrdensCompraService.downloadExcelInsumos();
-      setLastResult("OK - Excel gerado e baixado com sucesso.");
+      await downloadExcel();
+      setLastResult("OK - Excel gerado e baixado.");
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
       setLastResult("Erro: " + (msg || "Falha ao gerar Excel."));
@@ -159,60 +170,46 @@ function OrdensCompraContent() {
   const totalForn  = preview?.total_fornecedores ?? 0;
   const totalItens = preview?.total_itens ?? 0;
 
+  const semLT = preview?.fornecedores.flatMap(f => f.itens.filter(i => i.sem_leadtime)) ?? [];
+
   return (
-    <div className="page">
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">Ordens de Compra &mdash; Insumos</h1>
-          <p className="page-subtitle">
-            Pre-visualizacao de reposicao &middot; agrupada por fornecedor
-          </p>
-        </div>
-        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-          <button className="btn-ghost" onClick={loadPreview} style={{ fontSize: "0.82rem" }}>
-            Atualizar
-          </button>
-          <button
-            className="btn-primary"
-            onClick={exportarExcel}
-            disabled={downloading || !preview || totalItens === 0}
-            title="Gera planilha Excel no formato de importacao do Delphus"
-          >
-            {downloading ? "Gerando..." : "Exportar Excel para ERP"}
-          </button>
-        </div>
+    <div>
+      <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 16, flexWrap: "wrap" }}>
+        <button className="btn-ghost" onClick={load} style={{ fontSize: "0.82rem" }}>
+          Atualizar
+        </button>
+        <button
+          className="btn-primary"
+          onClick={exportar}
+          disabled={downloading || !preview || totalItens === 0}
+          title={`Gera planilha Excel — ${titulo}`}
+        >
+          {downloading ? "Gerando..." : "Exportar Excel para ERP"}
+        </button>
+        {lastResult && (
+          <span style={{
+            fontSize: "0.82rem",
+            color: lastResult.startsWith("OK") ? "var(--success)" : "var(--danger)",
+          }}>
+            {lastResult}
+          </span>
+        )}
       </div>
 
-      {lastResult && (
-        <div style={{
-          padding: "10px 14px",
-          borderRadius: 8,
-          background: lastResult.startsWith("OK") ? "rgba(4,213,4,0.08)" : "rgba(239,68,68,0.08)",
-          border: `1px solid ${lastResult.startsWith("OK") ? "var(--success)" : "var(--danger)"}`,
-          color: lastResult.startsWith("OK") ? "var(--success)" : "var(--danger)",
-          marginBottom: 16,
-          fontSize: "0.88rem",
-        }}>
-          {lastResult}
-        </div>
-      )}
-
-      {loadingPreview ? (
+      {loading ? (
         <LoadingSpinner />
-      ) : previewError ? (
+      ) : error ? (
         <div style={{ padding: "12px 16px", borderRadius: 8, background: "rgba(239,68,68,0.08)", border: "1px solid var(--danger)", color: "var(--danger)", fontSize: "0.88rem" }}>
-          {previewError}
+          {error}
         </div>
       ) : preview && preview.fornecedores.length > 0 ? (
         <>
           <div style={{ marginBottom: 16, color: "var(--muted)", fontSize: "0.85rem" }}>
             <span style={{ color: "var(--text)", fontWeight: 600 }}>{totalForn}</span>
-            {" fornecedor"}
-            {totalForn !== 1 ? "es" : ""}
+            {" fornecedor"}{totalForn !== 1 ? "es" : ""}
             {" · "}
             <span style={{ color: "var(--text)", fontWeight: 600 }}>{totalItens}</span>
-            {" ite"}
-            {totalItens !== 1 ? "ns" : "m"}
+            {" ite"}{totalItens !== 1 ? "ns" : "m"}
             {" precisam de reposicao"}
           </div>
           {preview.fornecedores.map(forn => (
@@ -222,20 +219,55 @@ function OrdensCompraContent() {
               defaultOpen={(forn.itens ?? []).length <= 5}
             />
           ))}
+
+          {semLT.length > 0 && (
+            <SemLeadtimeAlert itens={semLT} />
+          )}
         </>
       ) : (
         <div style={{ textAlign: "center", color: "var(--muted)", padding: "48px 0", fontSize: "0.9rem" }}>
-          Nenhum insumo precisa de reposicao no momento.
+          Nenhum item precisa de reposicao no momento.
         </div>
       )}
     </div>
   );
 }
 
-export function OrdensCompraPage() {
+function SemLeadtimeAlert({ itens }: { itens: { cpd: string; descricao: string | null }[] }) {
+  const [open, setOpen] = useState(false);
   return (
-    <ErrorBoundary>
-      <OrdensCompraContent />
-    </ErrorBoundary>
+    <div style={{ marginTop: 24, border: "1px solid rgba(245,158,11,0.3)", borderRadius: 8, overflow: "hidden" }}>
+      <div
+        style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: "rgba(245,158,11,0.08)", cursor: "pointer" }}
+        onClick={() => setOpen(o => !o)}
+      >
+        <span style={{ color: "var(--warning)", fontSize: "0.82rem", fontWeight: 600 }}>
+          {open ? "▾" : "▸"} {itens.length} {itens.length === 1 ? "item" : "itens"} sem leadtime cadastrado
+        </span>
+        <span style={{ color: "var(--muted)", fontSize: "0.75rem" }}>
+          (usando prazo padrao de 30 dias — cadastre o leadtime no ERP)
+        </span>
+      </div>
+      {open && (
+        <div style={{ padding: "8px 14px 12px" }}>
+          <table className="data-table" style={{ marginBottom: 0 }}>
+            <thead>
+              <tr>
+                <th>CPD</th>
+                <th>Descricao</th>
+              </tr>
+            </thead>
+            <tbody>
+              {itens.map(i => (
+                <tr key={i.cpd}>
+                  <td><code style={{ color: "var(--muted)", fontSize: "0.8rem" }}>{i.cpd}</code></td>
+                  <td style={{ color: "var(--muted)" }}>{i.descricao || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
   );
 }

@@ -1,12 +1,12 @@
 export function LoadingSpinner({ text = "Carregando..." }: { text?: string }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10, color: "#94a3b8", padding: "2rem 0" }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 10, color: "var(--muted)", padding: "2rem 0" }}>
       <span style={{
         display: "inline-block",
         width: 18,
         height: 18,
-        border: "2px solid #2e3250",
-        borderTopColor: "#0ea5e9",
+        border: "2px solid var(--border)",
+        borderTopColor: "var(--accent)",
         borderRadius: "50%",
         animation: "spin 0.7s linear infinite",
       }} />

@@ -2,6 +2,34 @@ from datetime import datetime
 from pydantic import BaseModel
 
 
+class PreviewItemOC(BaseModel):
+    cpd: str
+    codigo_fabricante: str | None
+    descricao: str | None
+    qtd_sugerida: float
+    moq: float
+    unidade: str | None
+    leadtime_semanas: float
+    data_entrega: str            # ISO date "YYYY-MM-DD" (pode ser consolidada)
+    data_entrega_ajustada: bool = False  # True quando a data foi consolidada com outros itens
+    sem_leadtime: bool = False           # True quando leadtime=0 (usando fallback 30 dias)
+    estoque_atual: float
+    estoque_minimo: float
+    ocs_abertas: float
+
+
+class PreviewFornecedorOC(BaseModel):
+    razao_social: str
+    id_fornecedor: int | None
+    itens: list[PreviewItemOC]
+
+
+class PreviewOCResponse(BaseModel):
+    fornecedores: list[PreviewFornecedorOC]
+    total_fornecedores: int
+    total_itens: int
+
+
 class ItemOrdemCompraResponse(BaseModel):
     id: int
     cpd: str

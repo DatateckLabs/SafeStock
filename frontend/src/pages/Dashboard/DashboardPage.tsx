@@ -29,22 +29,22 @@ export function DashboardPage() {
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 28 }}>
-        <div className="stat-card" style={{ borderTop: "3px solid #ef4444" }}>
-          <p className="stat-value" style={{ color: "#ef4444" }}>{stats.insumos_abaixo_minimo}</p>
+        <div className="stat-card" style={{ borderTop: "3px solid var(--danger)" }}>
+          <p className="stat-value" style={{ color: "var(--danger)" }}>{stats.insumos_abaixo_minimo}</p>
           <p className="stat-label">Insumos abaixo do mínimo</p>
         </div>
-        <div className="stat-card" style={{ borderTop: "3px solid #eab308" }}>
-          <p className="stat-value" style={{ color: "#eab308" }}>{stats.ferramentas_criticas}</p>
+        <div className="stat-card" style={{ borderTop: "3px solid var(--warning)" }}>
+          <p className="stat-value" style={{ color: "var(--warning)" }}>{stats.ferramentas_criticas}</p>
           <p className="stat-label">Ferramentas em alerta/crítico</p>
         </div>
-        <div className="stat-card" style={{ borderTop: "3px solid #0ea5e9" }}>
-          <p className="stat-value" style={{ color: "#0ea5e9" }}>{stats.ocs_geradas_hoje}</p>
+        <div className="stat-card" style={{ borderTop: "3px solid var(--accent)" }}>
+          <p className="stat-value" style={{ color: "var(--accent)" }}>{stats.ocs_geradas_hoje}</p>
           <p className="stat-label">OCs geradas hoje</p>
         </div>
       </div>
 
       <div className="table-card">
-        <h2 style={{ color: "#e2e8f0", fontSize: "0.95rem", fontWeight: 600, marginBottom: 14 }}>
+        <h2 style={{ color: "var(--text)", fontSize: "0.95rem", fontWeight: 600, marginBottom: 14 }}>
           Alertas prioritários
         </h2>
         {stats.alertas.length === 0 ? (
@@ -65,7 +65,7 @@ export function DashboardPage() {
               {stats.alertas.map(a => (
                 <tr key={`${a.tipo}-${a.cpd}`}>
                   <td><Semaforo situacao={a.situacao} label /></td>
-                  <td><code style={{ fontSize: "0.8rem", color: "#94a3b8" }}>{a.cpd}</code></td>
+                  <td><code style={{ fontSize: "0.8rem", color: "var(--muted)" }}>{a.cpd}</code></td>
                   <td>{a.descricao || "—"}</td>
                   <td>
                     <span className={`badge ${a.tipo === "insumo" ? "badge-blue" : "badge-purple"}`}>

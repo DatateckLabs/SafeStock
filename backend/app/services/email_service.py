@@ -23,12 +23,20 @@ def _send_email_sync(
     assunto: str,
     corpo: str,
     attachments: list[tuple[str, bytes]],
+    corpo_html: str | None = None,
 ) -> None:
-    msg = MIMEMultipart()
+    msg = MIMEMultipart("alternative" if corpo_html and not attachments else "mixed")
     msg["From"] = smtp_user
     msg["To"] = destinatario
     msg["Subject"] = assunto
-    msg.attach(MIMEText(corpo, "plain", "utf-8"))
+
+    if corpo_html:
+        alt = MIMEMultipart("alternative")
+        alt.attach(MIMEText(corpo, "plain", "utf-8"))
+        alt.attach(MIMEText(corpo_html, "html", "utf-8"))
+        msg.attach(alt)
+    else:
+        msg.attach(MIMEText(corpo, "plain", "utf-8"))
 
     for filename, content in attachments:
         part = MIMEApplication(content, Name=filename)
@@ -70,4 +78,29 @@ async def enviar_oc_por_email(
         _send_email_sync,
         smtp_host, smtp_port, smtp_user, smtp_password,
         destinatario, assunto, corpo, [(filename, csv_content)],
+    )
+
+
+async def enviar_email_generico(
+    db: Session,
+    destinatario: str,
+    assunto: str,
+    corpo_texto: str,
+    corpo_html: str | None = None,
+    attachments: list[tuple[str, bytes]] | None = None,
+) -> None:
+    smtp_host = _get_param(db, "smtp_host")
+    smtp_port = int(_get_param(db, "smtp_port", "587"))
+    smtp_user = _get_param(db, "smtp_user")
+    smtp_password = settings.smtp_password
+
+    if not smtp_host or not smtp_user:
+        raise ValueError("SMTP não configurado. Configure smtp_host e smtp_user em Parâmetros Globais.")
+
+    await asyncio.to_thread(
+        _send_email_sync,
+        smtp_host, smtp_port, smtp_user, smtp_password,
+        destinatario, assunto, corpo_texto,
+        attachments or [],
+        corpo_html,
     )

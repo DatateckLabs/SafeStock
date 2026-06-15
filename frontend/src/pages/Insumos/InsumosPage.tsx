@@ -1,22 +1,26 @@
 import { useState, useEffect } from "react";
 import { InsumosService } from "../../services/InsumosService";
-import { FerramentasService } from "../../services/FerramentasService";
+import { OrdensCompraService } from "../../services/OrdensCompraService";
+import { DisparoService } from "../../services/DisparoService";
 import { Modal } from "../../components/Modal";
+import { OcPreviewTab } from "../../components/OcPreviewCard";
 import { useAuth } from "../../auth/useAuth";
-import type { InsumoResponse, FerramentaResponse, DrilldownItem } from "../../types";
-
-// ─── helpers ─────────────────────────────────────────────────────────────────
+import type { InsumoResponse, DisparoLog, DisparoResult } from "../../types";
 
 const fmt = (n: number) =>
   n.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 function saldoInsumo(i: InsumoResponse): number | null {
   if (i.estoque_minimo <= 0) return null;
-  return i.estoque_almoxarifado - i.estoque_minimo;
+  return i.estoque_almoxarifado + i.ocs_abertas - i.estoque_minimo;
 }
 
-function saldoFerramenta(f: FerramentaResponse): number {
-  return f.estoque_atual - f.estoque_minimo_calculado;
+function compraSugerida(i: InsumoResponse): number | null {
+  if (i.estoque_minimo <= 0) return null;
+  const needed = Math.max(0, i.estoque_minimo - i.estoque_almoxarifado - i.ocs_abertas);
+  if (needed === 0) return null;
+  if (i.moq <= 0) return needed;
+  return Math.ceil(needed / i.moq) * i.moq;
 }
 
 function sortBySaldoInsumo(items: InsumoResponse[]): InsumoResponse[] {
@@ -27,19 +31,13 @@ function sortBySaldoInsumo(items: InsumoResponse[]): InsumoResponse[] {
   });
 }
 
-function sortBySaldoFerramenta(items: FerramentaResponse[]): FerramentaResponse[] {
-  return [...items].sort((a, b) => saldoFerramenta(a) - saldoFerramenta(b));
-}
-
-// ─── shared components ────────────────────────────────────────────────────────
-
 function SaldoCell({ value }: { value: number | null }) {
-  if (value === null) return <span style={{ color: "#475569" }}>—</span>;
+  if (value === null) return <span style={{ color: "var(--muted)" }}>—</span>;
   if (value > 0)
-    return <span style={{ color: "#22c55e", fontWeight: 600 }}>+{fmt(value)}</span>;
+    return <span style={{ color: "var(--success)", fontWeight: 600 }}>+{fmt(value)}</span>;
   if (value < 0)
-    return <span style={{ color: "#ef4444", fontWeight: 600 }}>−{fmt(Math.abs(value))}</span>;
-  return <span style={{ color: "#64748b" }}>0,00</span>;
+    return <span style={{ color: "var(--danger)", fontWeight: 600 }}>−{fmt(Math.abs(value))}</span>;
+  return <span style={{ color: "var(--muted)" }}>0,00</span>;
 }
 
 function SkeletonRow({ cols }: { cols: number }) {
@@ -54,9 +52,9 @@ function SkeletonRow({ cols }: { cols: number }) {
   );
 }
 
-// ─── Insumos tab ──────────────────────────────────────────────────────────────
+// ─── Insumos lista ────────────────────────────────────────────────────────────
 
-function InsumosTab() {
+function InsumosListTab() {
   const { user } = useAuth();
   const [items, setItems]       = useState<InsumoResponse[]>([]);
   const [loading, setLoading]   = useState(true);
@@ -107,11 +105,12 @@ function InsumosTab() {
     items.filter(
       i =>
         i.cpd.toLowerCase().includes(search.toLowerCase()) ||
-        (i.descricao || "").toLowerCase().includes(search.toLowerCase())
+        (i.descricao || "").toLowerCase().includes(search.toLowerCase()) ||
+        (i.codigo_fabricante || "").toLowerCase().includes(search.toLowerCase())
     )
   );
 
-  const cols = canEdit ? 7 : 6;
+  const cols = canEdit ? 9 : 8;
 
   return (
     <>
@@ -119,11 +118,11 @@ function InsumosTab() {
         <input
           className="search-input"
           style={{ marginBottom: 0, flex: 1, maxWidth: 360 }}
-          placeholder="Buscar por CPD ou descrição..."
+          placeholder="Buscar por CPD ou descricao..."
           value={search}
           onChange={e => setSearch(e.target.value)}
         />
-        <span style={{ color: "#475569", fontSize: "0.82rem" }}>
+        <span style={{ color: "var(--muted)", fontSize: "0.82rem" }}>
           {loading ? "…" : `${filtered.length} itens`}
         </span>
       </div>
@@ -135,11 +134,13 @@ function InsumosTab() {
           <thead>
             <tr>
               <th>CPD</th>
-              <th>Descrição</th>
-              <th style={{ textAlign: "right" }}>Est. Mínimo</th>
+              <th>Cod. Fabricante</th>
+              <th>Descricao</th>
+              <th style={{ textAlign: "right" }}>Est. Minimo</th>
               <th style={{ textAlign: "right" }}>OCs em Aberto</th>
               <th style={{ textAlign: "right" }}>Est. Atual</th>
               <th style={{ textAlign: "right" }}>Saldo</th>
+              <th style={{ textAlign: "right" }}>Compra Sugerida</th>
               {canEdit && <th style={{ width: 40 }} />}
             </tr>
           </thead>
@@ -151,32 +152,20 @@ function InsumosTab() {
                   return (
                     <tr key={item.cpd}>
                       <td>
-                        <code style={{ fontSize: "0.8rem", color: "#94a3b8" }}>{item.cpd}</code>
+                        <code style={{ fontSize: "0.8rem", color: "var(--muted)" }}>{item.cpd}</code>
+                      </td>
+                      <td style={{ color: "var(--muted)", fontSize: "0.82rem" }}>
+                        {item.codigo_fabricante || "—"}
                       </td>
                       <td
-                        style={{
-                          maxWidth: 280,
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                        }}
+                        style={{ maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
                       >
                         {item.descricao || "—"}
                       </td>
-                      <td
-                        style={{
-                          textAlign: "right",
-                          color: item.estoque_minimo > 0 ? "#e2e8f0" : "#475569",
-                        }}
-                      >
+                      <td style={{ textAlign: "right", color: item.estoque_minimo > 0 ? "var(--text)" : "var(--muted)" }}>
                         {item.estoque_minimo > 0 ? fmt(item.estoque_minimo) : "—"}
                       </td>
-                      <td
-                        style={{
-                          textAlign: "right",
-                          color: item.ocs_abertas > 0 ? "#0ea5e9" : "#475569",
-                        }}
-                      >
+                      <td style={{ textAlign: "right", color: item.ocs_abertas > 0 ? "var(--accent)" : "var(--muted)" }}>
                         {fmt(item.ocs_abertas)}
                       </td>
                       <td style={{ textAlign: "right", fontWeight: 600 }}>
@@ -185,11 +174,27 @@ function InsumosTab() {
                       <td style={{ textAlign: "right" }}>
                         <SaldoCell value={saldo} />
                       </td>
+                      <td style={{ textAlign: "right" }}>
+                        {(() => {
+                          const cs = compraSugerida(item);
+                          if (cs === null) return <span style={{ color: "var(--text-dim)" }}>—</span>;
+                          return (
+                            <span style={{ color: "var(--warning)", fontWeight: 600 }}>
+                              {fmt(cs)}
+                              {item.moq > 0 && (
+                                <span style={{ color: "var(--muted)", fontSize: "0.72rem", marginLeft: 4 }}>
+                                  MOQ {fmt(item.moq)}
+                                </span>
+                              )}
+                            </span>
+                          );
+                        })()}
+                      </td>
                       {canEdit && (
                         <td style={{ textAlign: "center" }}>
                           <button
                             className="expand-btn"
-                            title="Editar mínimo/máximo"
+                            title="Editar minimo/maximo"
                             onClick={() => openEdit(item)}
                           >
                             ✎
@@ -208,10 +213,10 @@ function InsumosTab() {
 
       {editItem && (
         <Modal title={`Editar estoque — ${editItem.cpd}`} onClose={() => setEditItem(null)}>
-          <p style={{ color: "#94a3b8", fontSize: "0.85rem", marginBottom: 16 }}>
+          <p style={{ color: "var(--muted)", fontSize: "0.85rem", marginBottom: 16 }}>
             {editItem.descricao}
           </p>
-          <label className="form-label">Estoque mínimo</label>
+          <label className="form-label">Estoque minimo</label>
           <input
             className="form-input"
             type="number"
@@ -220,7 +225,7 @@ function InsumosTab() {
             onChange={e => setFormMin(parseFloat(e.target.value) || 0)}
           />
           <label className="form-label" style={{ marginTop: 12 }}>
-            Estoque máximo
+            Estoque maximo
           </label>
           <input
             className="form-input"
@@ -243,259 +248,201 @@ function InsumosTab() {
   );
 }
 
-// ─── Ferramentas tab ──────────────────────────────────────────────────────────
+// ─── Disparo Tab ──────────────────────────────────────────────────────────────
 
-function FerramentasTab() {
-  const [items, setItems]       = useState<FerramentaResponse[]>([]);
-  const [loading, setLoading]   = useState(true);
-  const [error, setError]       = useState<string | null>(null);
-  const [search, setSearch]     = useState("");
-  const [expanded, setExpanded] = useState<string | null>(null);
-  const [drillMap, setDrillMap] = useState<Record<string, DrilldownItem[]>>({});
-  const [drilling, setDrilling] = useState<string | null>(null);
+const fmtBRL = (v: number) =>
+  v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
-  useEffect(() => { load(); }, []);
+const fmtDate = (iso: string) =>
+  new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
 
-  function load() {
+function DisparoTab() {
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<DisparoResult | null>(null);
+  const [log, setLog] = useState<DisparoLog[]>([]);
+  const [logLoading, setLogLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    DisparoService.getLog()
+      .then(setLog)
+      .catch(() => {})
+      .finally(() => setLogLoading(false));
+  }, []);
+
+  async function handleDisparo() {
     setLoading(true);
     setError(null);
-    FerramentasService.getAll()
-      .then(setItems)
-      .catch(() => setError("Erro ao carregar ferramentas."))
-      .finally(() => setLoading(false));
-  }
-
-  function toggle(cpd: string) {
-    if (expanded === cpd) {
-      setExpanded(null);
-      return;
-    }
-    setExpanded(cpd);
-    if (!drillMap[cpd]) {
-      setDrilling(cpd);
-      FerramentasService.getDrilldown(cpd)
-        .then(data => setDrillMap(m => ({ ...m, [cpd]: data })))
-        .catch(() => setDrillMap(m => ({ ...m, [cpd]: [] })))
-        .finally(() => setDrilling(null));
+    setResult(null);
+    try {
+      const res = await DisparoService.dispararInsumos();
+      setResult(res);
+      // recarrega log
+      const updated = await DisparoService.getLog();
+      setLog(updated);
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Erro ao disparar e-mail.";
+      setError(msg);
+    } finally {
+      setLoading(false);
     }
   }
-
-  const filtered = sortBySaldoFerramenta(
-    items.filter(
-      i =>
-        i.cpd_ferramenta.toLowerCase().includes(search.toLowerCase()) ||
-        (i.descricao || "").toLowerCase().includes(search.toLowerCase())
-    )
-  );
 
   return (
-    <>
-      <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 16 }}>
-        <input
-          className="search-input"
-          style={{ marginBottom: 0, flex: 1, maxWidth: 360 }}
-          placeholder="Buscar por CPD ou descrição..."
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-        />
-        <span style={{ color: "#475569", fontSize: "0.82rem" }}>
-          {loading ? "…" : `${filtered.length} ferramentas`}
-        </span>
-      </div>
+    <div style={{ padding: "24px 0" }}>
+      {/* Painel de ação */}
+      <div style={{
+        background: "var(--surface)",
+        border: "1px solid var(--border)",
+        borderRadius: 10,
+        padding: 24,
+        marginBottom: 28,
+        maxWidth: 560,
+      }}>
+        <h3 style={{ margin: "0 0 8px", color: "var(--text)", fontWeight: 700 }}>Disparo via E-mail</h3>
+        <p style={{ margin: "0 0 20px", color: "var(--muted)", fontSize: "0.88rem", lineHeight: 1.5 }}>
+          Envia o Excel de OC de insumos para o operador ERP e um dashboard executivo
+          com o valor estimado de compras para o gestor.
+        </p>
+        <button
+          className="btn-accent"
+          onClick={handleDisparo}
+          disabled={loading}
+          style={{ minWidth: 180 }}
+        >
+          {loading ? "Enviando..." : "✉ Disparar Agora"}
+        </button>
 
-      {error && <p className="error-text">{error}</p>}
+        {error && (
+          <div style={{ marginTop: 16, padding: "10px 14px", background: "rgba(239,68,68,0.1)", border: "1px solid var(--danger)", borderRadius: 6, color: "var(--danger)", fontSize: "0.85rem" }}>
+            {error}
+          </div>
+        )}
 
-      <div className="table-card">
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th style={{ width: 32 }} />
-              <th>CPD</th>
-              <th>Descrição</th>
-              <th style={{ textAlign: "right" }}>Consumo Mensal</th>
-              <th style={{ textAlign: "right" }}>Est. Mínimo</th>
-              <th style={{ textAlign: "right" }}>OCs em Aberto</th>
-              <th style={{ textAlign: "right" }}>Est. Atual</th>
-              <th style={{ textAlign: "right" }}>Saldo</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading
-              ? Array.from({ length: 10 }).map((_, i) => (
-                  <SkeletonRow key={i} cols={8} />
-                ))
-              : filtered.flatMap(item => {
-                  const saldo = saldoFerramenta(item);
-                  const isOpen = expanded === item.cpd_ferramenta;
-                  const drill = drillMap[item.cpd_ferramenta];
-                  const isLoading = drilling === item.cpd_ferramenta;
-
-                  const mainRow = (
-                    <tr
-                      key={item.cpd_ferramenta}
-                      style={{
-                        cursor: "pointer",
-                        background: isOpen ? "#1e2235" : undefined,
-                      }}
-                      onClick={() => toggle(item.cpd_ferramenta)}
-                    >
-                      <td style={{ textAlign: "center" }}>
-                        <button className="expand-btn" tabIndex={-1}>
-                          {isOpen ? "▾" : "▸"}
-                        </button>
-                      </td>
-                      <td>
-                        <code style={{ fontSize: "0.8rem", color: "#94a3b8" }}>
-                          {item.cpd_ferramenta}
-                        </code>
-                      </td>
-                      <td
-                        style={{
-                          maxWidth: 240,
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {item.descricao || "—"}
-                      </td>
-                      <td style={{ textAlign: "right", color: "#94a3b8" }}>
-                        {fmt(item.consumo_mensal)}
-                      </td>
-                      <td style={{ textAlign: "right" }}>
-                        {item.estoque_minimo_calculado > 0 ? (
-                          fmt(item.estoque_minimo_calculado)
-                        ) : (
-                          <span style={{ color: "#475569" }}>0,00</span>
-                        )}
-                      </td>
-                      <td
-                        style={{
-                          textAlign: "right",
-                          color: item.ocs_abertas > 0 ? "#0ea5e9" : "#475569",
-                        }}
-                      >
-                        {fmt(item.ocs_abertas)}
-                      </td>
-                      <td style={{ textAlign: "right", fontWeight: 600 }}>
-                        {fmt(item.estoque_atual)}
-                      </td>
-                      <td style={{ textAlign: "right" }}>
-                        <SaldoCell value={saldo} />
-                      </td>
-                    </tr>
-                  );
-
-                  if (!isOpen) return [mainRow];
-
-                  const drillRow = (
-                    <tr key={`drill-${item.cpd_ferramenta}`} className="drill-row">
-                      <td colSpan={8}>
-                        <div className="drill-inner">
-                          {isLoading ? (
-                            <p style={{ color: "#475569", padding: "10px 0", fontSize: "0.83rem" }}>
-                              Carregando terminais...
-                            </p>
-                          ) : !drill || drill.length === 0 ? (
-                            <p style={{ color: "#475569", padding: "10px 0", fontSize: "0.83rem" }}>
-                              Nenhuma OP pendente encontrada para esta ferramenta.
-                            </p>
-                          ) : (
-                            <table className="drill-table">
-                              <thead>
-                                <tr>
-                                  <th>Terminal (CPD)</th>
-                                  <th>Descrição</th>
-                                  <th style={{ textAlign: "right" }}>OPs Pendentes</th>
-                                  <th style={{ textAlign: "right" }}>Consumo Mensal</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {drill.map(d => (
-                                  <tr key={d.cpd_materia_prima}>
-                                    <td>
-                                      <code style={{ fontSize: "0.78rem" }}>
-                                        {d.cpd_materia_prima}
-                                      </code>
-                                    </td>
-                                    <td
-                                      style={{
-                                        maxWidth: 240,
-                                        overflow: "hidden",
-                                        textOverflow: "ellipsis",
-                                        whiteSpace: "nowrap",
-                                      }}
-                                    >
-                                      {d.descricao || "—"}
-                                    </td>
-                                    <td style={{ textAlign: "right" }}>{fmt(d.ops_pendentes)}</td>
-                                    <td style={{ textAlign: "right" }}>
-                                      {fmt(d.consumo_mensal_ferramenta)}
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-
-                  return [mainRow, drillRow];
-                })}
-          </tbody>
-        </table>
-        {!loading && filtered.length === 0 && (
-          <p className="empty-state">Nenhuma ferramenta encontrada.</p>
+        {result && (
+          <div style={{
+            marginTop: 16,
+            padding: "12px 16px",
+            background: result.log.status === "ok" ? "rgba(4,213,4,0.08)" : "rgba(239,68,68,0.08)",
+            border: `1px solid ${result.log.status === "ok" ? "var(--success)" : "var(--danger)"}`,
+            borderRadius: 6,
+            fontSize: "0.85rem",
+          }}>
+            <div style={{ fontWeight: 700, color: result.log.status === "ok" ? "var(--success)" : "var(--danger)", marginBottom: 6 }}>
+              {result.log.status === "ok" ? "✓ Enviado com sucesso" : "✗ Erro no disparo"}
+            </div>
+            <div style={{ color: "var(--text)", lineHeight: 1.7 }}>
+              {result.log.total_fornecedores > 0 && <>
+                <span style={{ color: "var(--muted)" }}>Fornecedores:</span> {result.log.total_fornecedores} &nbsp;|&nbsp;
+                <span style={{ color: "var(--muted)" }}>Itens:</span> {result.log.total_itens}
+                {result.log.valor_total_brl != null && <> &nbsp;|&nbsp; <span style={{ color: "var(--muted)" }}>Valor estimado:</span> <strong style={{ color: "var(--accent)" }}>{fmtBRL(result.log.valor_total_brl)}</strong></>}
+                {result.log.cotacao_usd_brl && <> &nbsp;|&nbsp; <span style={{ color: "var(--muted)" }}>USD/BRL:</span> {result.log.cotacao_usd_brl.toFixed(4)}</>}
+              </>}
+              {result.log.erro_msg && <div style={{ color: "var(--danger)", marginTop: 4 }}>{result.log.erro_msg}</div>}
+            </div>
+          </div>
         )}
       </div>
-    </>
+
+      {/* Histórico */}
+      <h3 style={{ margin: "0 0 12px", color: "var(--text)", fontWeight: 700, fontSize: "1rem" }}>Histórico de Disparos</h3>
+      {logLoading ? (
+        <p style={{ color: "var(--muted)" }}>Carregando...</p>
+      ) : log.length === 0 ? (
+        <p style={{ color: "var(--muted)" }}>Nenhum disparo registrado.</p>
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.84rem" }}>
+            <thead>
+              <tr style={{ background: "var(--surface2)" }}>
+                {["Data", "Tipo", "Status", "Fornecedores", "Itens", "Valor (BRL)", "USD/BRL", "Arquivo", "Erro"].map(h => (
+                  <th key={h} style={{ padding: "8px 12px", textAlign: "left", color: "var(--muted)", fontWeight: 600, borderBottom: "1px solid var(--border)", whiteSpace: "nowrap" }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {log.map(r => (
+                <tr key={r.id} style={{ borderBottom: "1px solid var(--border)" }}>
+                  <td style={{ padding: "7px 12px", color: "var(--text)", whiteSpace: "nowrap" }}>{fmtDate(r.created_at)}</td>
+                  <td style={{ padding: "7px 12px", color: "var(--muted)" }}>{r.tipo}</td>
+                  <td style={{ padding: "7px 12px" }}>
+                    <span style={{
+                      padding: "2px 8px",
+                      borderRadius: 4,
+                      fontSize: "0.78rem",
+                      fontWeight: 700,
+                      background: r.status === "ok" ? "rgba(4,213,4,0.12)" : "rgba(239,68,68,0.12)",
+                      color: r.status === "ok" ? "var(--success)" : "var(--danger)",
+                    }}>{r.status}</span>
+                  </td>
+                  <td style={{ padding: "7px 12px", color: "var(--text)", textAlign: "right" }}>{r.total_fornecedores}</td>
+                  <td style={{ padding: "7px 12px", color: "var(--text)", textAlign: "right" }}>{r.total_itens}</td>
+                  <td style={{ padding: "7px 12px", color: "var(--accent)", fontWeight: 600, textAlign: "right" }}>
+                    {r.valor_total_brl != null ? fmtBRL(r.valor_total_brl) : "—"}
+                  </td>
+                  <td style={{ padding: "7px 12px", color: "var(--muted)", textAlign: "right" }}>
+                    {r.cotacao_usd_brl != null ? r.cotacao_usd_brl.toFixed(4) : "—"}
+                  </td>
+                  <td style={{ padding: "7px 12px", color: "var(--muted)", fontSize: "0.78rem" }}>{r.arquivo_nome ?? "—"}</td>
+                  <td style={{ padding: "7px 12px", color: "var(--danger)", fontSize: "0.78rem", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {r.erro_msg ?? "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
   );
 }
 
-// ─── Combined page ────────────────────────────────────────────────────────────
+// ─── Page shell ───────────────────────────────────────────────────────────────
 
-export function InsumosPage({ defaultTab = "insumos" }: { defaultTab?: "insumos" | "ferramentas" }) {
-  const [tab, setTab]           = useState<"insumos" | "ferramentas">(defaultTab);
-  const [refreshKey, setRefreshKey] = useState(0);
+type TabId = "lista" | "oc-insumos" | "disparo";
+
+export function InsumosPage() {
+  const [tab, setTab] = useState<TabId>("lista");
 
   return (
     <div className="page">
       <div className="page-header">
         <div>
-          <h1 className="page-title">Estoque</h1>
-          <p className="page-subtitle">Insumos e ferramentas · dados em tempo real do BigQuery</p>
+          <h1 className="page-title">Insumos</h1>
+          <p className="page-subtitle">Estoque e ordens de compra · BigQuery em tempo real</p>
         </div>
-        <button
-          className="btn-ghost"
-          onClick={() => setRefreshKey(k => k + 1)}
-          style={{ fontSize: "0.82rem" }}
-        >
-          ↺ Atualizar
-        </button>
       </div>
 
       <div className="tab-bar">
         <button
-          className={`tab-btn${tab === "insumos" ? " active" : ""}`}
-          onClick={() => setTab("insumos")}
+          className={`tab-btn${tab === "lista" ? " active" : ""}`}
+          onClick={() => setTab("lista")}
         >
-          Insumos
+          Lista
         </button>
         <button
-          className={`tab-btn${tab === "ferramentas" ? " active" : ""}`}
-          onClick={() => setTab("ferramentas")}
+          className={`tab-btn${tab === "oc-insumos" ? " active" : ""}`}
+          onClick={() => setTab("oc-insumos")}
         >
-          Ferramentas
+          OC Insumos
+        </button>
+        <button
+          className={`tab-btn${tab === "disparo" ? " active" : ""}`}
+          onClick={() => setTab("disparo")}
+        >
+          ✉ Disparo E-mail
         </button>
       </div>
 
-      {tab === "insumos" ? (
-        <InsumosTab key={`insumos-${refreshKey}`} />
-      ) : (
-        <FerramentasTab key={`ferramentas-${refreshKey}`} />
+      {tab === "lista" && <InsumosListTab />}
+      {tab === "oc-insumos" && (
+        <OcPreviewTab
+          getPreview={() => OrdensCompraService.getPreviewInsumos()}
+          downloadExcel={() => OrdensCompraService.downloadExcelInsumos()}
+          titulo="OC Insumos"
+        />
       )}
+      {tab === "disparo" && <DisparoTab />}
     </div>
   );
 }

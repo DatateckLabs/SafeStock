@@ -35,9 +35,13 @@ async def get_insumos(db: Session) -> list[InsumoResponse]:
     subgrupos_raw = _get_param(db, "subgrupos_insumos", "ETIQUETAS EXTERNAS,ETIQUETAS E RIBBONS INTERNAS")
     subgrupos = [s.strip() for s in subgrupos_raw.split(",") if s.strip()]
 
-    bq_rows = await asyncio.to_thread(bigquery_service.get_insumos, subgrupos)
+    bq_rows, bq_estoques = await asyncio.gather(
+        asyncio.to_thread(bigquery_service.get_insumos, subgrupos),
+        asyncio.to_thread(bigquery_service.get_estoques_minimos_bq),
+    )
 
-    estoques: dict[str, EstoqueMinimo] = {
+    # Overrides manuais gravados localmente no PostgreSQL
+    estoques_local: dict[str, EstoqueMinimo] = {
         e.cpd: e for e in db.query(EstoqueMinimo).all()
     }
 
@@ -56,15 +60,19 @@ async def get_insumos(db: Session) -> list[InsumoResponse]:
 
     results: list[InsumoResponse] = []
     for cpd, row in rows_with_cpd:
-        # Busca estoque mínimo tentando formato normalizado e legado "1797.0"
-        est_obj = estoques.get(cpd) or estoques.get(f"{float(cpd):.1f}" if cpd.isdigit() else cpd)
-        est_min = float(est_obj.estoque_minimo) if est_obj else 0.0
-        est_max = float(est_obj.estoque_maximo) if est_obj else 0.0
+        # Estoque mínimo: override local > BigQuery Silver > 0
+        local_obj = estoques_local.get(cpd) or estoques_local.get(f"{float(cpd):.1f}" if cpd.isdigit() else cpd)
+        if local_obj and float(local_obj.estoque_minimo) > 0:
+            est_min = float(local_obj.estoque_minimo)
+        else:
+            est_min = bq_estoques.get(cpd, 0.0)
+        est_max = float(local_obj.estoque_maximo) if local_obj else 0.0
         atual = float(row.get("ESTOQUE_ALMOXARIFADO") or 0)
 
         results.append(InsumoResponse(
             cpd=cpd,
             descricao=str(row.get("DESCRICAO_COMPLEMENTAR") or ""),
+            codigo_fabricante=str(row.get("CODIGO_FABRICANTE") or "") or None,
             subgrupo=str(row.get("SUBGRUPO") or ""),
             estoque_almoxarifado=atual,
             estoque_minimo=est_min,

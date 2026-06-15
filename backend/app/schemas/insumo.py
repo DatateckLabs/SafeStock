@@ -4,6 +4,7 @@ from pydantic import BaseModel
 class InsumoResponse(BaseModel):
     cpd: str
     descricao: str | None
+    codigo_fabricante: str | None
     subgrupo: str | None
     estoque_almoxarifado: float
     estoque_minimo: float       # 0.0 = sem cadastro em EstoqueMinimo

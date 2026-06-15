@@ -16,8 +16,8 @@ export function Modal({ title, onClose, children }: ModalProps) {
     >
       <div
         style={{
-          background: "#1a1d27",
-          border: "1px solid #2e3250",
+          background: "var(--surface)",
+          border: "1px solid var(--border)",
           borderRadius: 12,
           padding: "1.75rem 1.5rem",
           width: "100%",
@@ -27,11 +27,11 @@ export function Modal({ title, onClose, children }: ModalProps) {
         }}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.25rem" }}>
-          <h2 style={{ color: "#e2e8f0", fontSize: "1rem", fontWeight: 700, margin: 0 }}>{title}</h2>
+          <h2 style={{ color: "var(--text)", fontSize: "1rem", fontWeight: 700, margin: 0 }}>{title}</h2>
           <button
             onClick={onClose}
             style={{
-              background: "none", border: "none", color: "#94a3b8",
+              background: "none", border: "none", color: "var(--muted)",
               cursor: "pointer", fontSize: "1.25rem", lineHeight: 1, padding: 4,
             }}
           >

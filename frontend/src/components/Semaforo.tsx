@@ -4,9 +4,9 @@ interface SemaforoProps {
 }
 
 const CONFIG = {
-  ok:      { color: "#22c55e", text: "OK" },
-  alerta:  { color: "#eab308", text: "Alerta" },
-  critico: { color: "#ef4444", text: "Crítico" },
+  ok:      { color: "var(--success)", text: "OK" },
+  alerta:  { color: "var(--warning)", text: "Alerta" },
+  critico: { color: "var(--danger)",  text: "Crítico" },
 };
 
 export function Semaforo({ situacao, label = false }: SemaforoProps) {

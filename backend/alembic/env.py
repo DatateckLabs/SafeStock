@@ -18,6 +18,8 @@ from app.models.parametro_global import ParametroGlobal  # noqa: F401
 from app.models.estoque_minimo import EstoqueMinimo  # noqa: F401
 from app.models.criticidade_ferramenta import CriticidadeFerramenta  # noqa: F401
 from app.models.ordem_compra import OrdemCompraGerada, ItemOrdemCompraGerada  # noqa: F401
+from app.models.config_fornecedor import ConfigFornecedor  # noqa: F401
+from app.models.config_ferramenta import ConfigFerramenta  # noqa: F401
 
 target_metadata = Base.metadata
 

@@ -72,7 +72,7 @@ export function UsuariosPage() {
           <tbody>
             {users.map(u => (
               <tr key={u.id}>
-                <td style={{ fontWeight: 600, color: "#e2e8f0" }}>{u.username}</td>
+                <td style={{ fontWeight: 600, color: "var(--text)" }}>{u.username}</td>
                 <td>
                   <select
                     className="filter-select"
@@ -88,9 +88,9 @@ export function UsuariosPage() {
                   <button
                     onClick={() => toggleAtivo(u)}
                     style={{
-                      background: u.is_active ? "rgba(34,197,94,0.15)" : "rgba(239,68,68,0.15)",
-                      border: `1px solid ${u.is_active ? "#22c55e" : "#ef4444"}`,
-                      color: u.is_active ? "#22c55e" : "#ef4444",
+                      background: u.is_active ? "rgba(4,213,4,0.12)" : "rgba(239,68,68,0.12)",
+                      border: `1px solid ${u.is_active ? "var(--success)" : "var(--danger)"}`,
+                      color: u.is_active ? "var(--success)" : "var(--danger)",
                       borderRadius: 6,
                       padding: "3px 10px",
                       cursor: "pointer",
@@ -101,7 +101,7 @@ export function UsuariosPage() {
                     {u.is_active ? "Ativo" : "Inativo"}
                   </button>
                 </td>
-                <td style={{ color: "#64748b", fontSize: "0.82rem" }}>
+                <td style={{ color: "var(--muted)", fontSize: "0.82rem" }}>
                   {new Date(u.created_at).toLocaleDateString("pt-BR")}
                 </td>
                 <td>
@@ -123,7 +123,7 @@ export function UsuariosPage() {
 
       {showNew && (
         <Modal title="Novo Usuário" onClose={() => setShowNew(false)}>
-          <p style={{ color: "#64748b", fontSize: "0.82rem", marginBottom: 16 }}>
+          <p style={{ color: "var(--muted)", fontSize: "0.82rem", marginBottom: 16 }}>
             O usuário deve existir no auth-service (central ou local) para conseguir fazer login.
           </p>
           <label className="form-label">Username</label>
