@@ -2,7 +2,10 @@ import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { FerramentasService } from "../../services/FerramentasService";
 import { OrdensCompraService } from "../../services/OrdensCompraService";
+import { DisparoService } from "../../services/DisparoService";
 import { OcPreviewTab } from "../../components/OcPreviewCard";
+import { DisparoTab } from "../../components/DisparoTab";
+import { SobreModal, SobreButton } from "../../components/SobreModal";
 import type { FerramentaResponse, DrilldownItem, ConsumoMensalItem, SemFerramentaItem } from "../../types";
 
 const _consumoCache         = new Map<string, ConsumoMensalItem[]>();
@@ -17,12 +20,27 @@ function fmtMesAno(mesAno: string): string {
 const fmt = (n: number) =>
   n.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+function fmtData(d: string | null | undefined): string {
+  if (!d) return "—";
+  const m = d.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[3]}/${m[2]}/${m[1].slice(2)}`;
+  return d.slice(0, 10);
+}
+
 function saldoFerramenta(f: FerramentaResponse): number {
-  return f.estoque_atual - f.estoque_minimo_calculado;
+  return f.estoque_atual + f.ocs_abertas - f.estoque_minimo_calculado;
 }
 
 function sortBySaldoFerramenta(items: FerramentaResponse[]): FerramentaResponse[] {
   return [...items].sort((a, b) => saldoFerramenta(a) - saldoFerramenta(b));
+}
+
+function compraSugeridaFerramenta(f: FerramentaResponse): number | null {
+  if (f.estoque_minimo_calculado <= 0) return null;
+  const needed = Math.max(0, f.estoque_minimo_calculado - f.estoque_atual - f.ocs_abertas);
+  if (needed === 0) return null;
+  const moq = f.moq > 0 ? f.moq : 1;
+  return Math.ceil(needed / moq) * moq;
 }
 
 function SaldoCell({ value }: { value: number }) {
@@ -251,6 +269,46 @@ function ConsumoTooltip({
 
 // ─── Sem Config tab ───────────────────────────────────────────────────────────
 
+function exportarSemFerramentaXlsx(items: SemFerramentaItem[]) {
+  const esc = (v: unknown) => String(v ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const num = (v: number) => v.toLocaleString("pt-BR", { maximumFractionDigits: 4 });
+
+  const header = ["Subgrupo", "CPD", "Descrição", "Cód. Fabricante", "Consumo/mês", "Histórico/mês", "Pendente/mês", "Meses janela"];
+  const rows = items.map(i => [
+    i.subgrupo || "Sem Subgrupo",
+    i.cpd_materia_prima,
+    i.descricao || "",
+    i.codigo_fabricante || "",
+    num(i.consumo_mensal),
+    num(i.consumo_historico_mensal),
+    num(i.consumo_pendente_mensal),
+    i.janela_meses,
+  ]);
+
+  const thStyle = "background:#1a1a1a;color:#04d504;font-weight:bold;padding:6px 10px;border:1px solid #333;white-space:nowrap";
+  const tdStyle = "padding:5px 10px;border:1px solid #ddd;";
+
+  const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel">
+<head><meta charset="UTF-8">
+<!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets>
+<x:ExcelWorksheet><x:Name>Ferr. Pendentes</x:Name>
+<x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions>
+</x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->
+</head><body>
+<table border="1" style="border-collapse:collapse;font-family:Arial;font-size:12px">
+<thead><tr>${header.map(h => `<th style="${thStyle}">${esc(h)}</th>`).join("")}</tr></thead>
+<tbody>${rows.map((r, ri) => `<tr style="background:${ri % 2 === 0 ? "#fff" : "#f5f5f5"}">${r.map(c => `<td style="${tdStyle}">${esc(c)}</td>`).join("")}</tr>`).join("")}</tbody>
+</table></body></html>`;
+
+  const blob = new Blob(["﻿" + html], { type: "application/vnd.ms-excel;charset=utf-8" });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href     = url;
+  a.download = `ferr_pendentes_${new Date().toISOString().slice(0, 10)}.xls`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 function SemConfigTab({ items, loading }: { items: FerramentaResponse[]; loading: boolean }) {
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -475,23 +533,27 @@ function FerramentasListTab({
         <table className="data-table">
           <thead>
             <tr>
-              <th style={{ width: 32 }} />
-              <th>CPD</th>
-              <th>Cod. Fabricante</th>
-              <th style={{ textAlign: "right" }}>Terminais</th>
-              <th style={{ textAlign: "right" }}>Consumo Mensal</th>
-              <th style={{ textAlign: "right" }}>Est. Minimo</th>
-              <th style={{ textAlign: "right" }}>OCs em Aberto</th>
-              <th style={{ textAlign: "right" }}>Est. Atual</th>
-              <th style={{ textAlign: "right" }}>Saldo</th>
+              <th style={{ width: 28 }} />
+              <th style={{ width: 72 }}>CPD</th>
+              <th>Cód. Fabricante</th>
+              <th style={{ textAlign: "right", width: 60 }}>Term.</th>
+              <th style={{ textAlign: "right", width: 100 }}>Consumo/mês</th>
+              <th style={{ textAlign: "right", width: 90 }}>Est. Mín.</th>
+              <th style={{ textAlign: "right", width: 70 }}>OCs</th>
+              <th style={{ textAlign: "right", width: 90 }}>Est. Atual</th>
+              <th style={{ textAlign: "right", width: 80, whiteSpace: "nowrap" }}>Inventário</th>
+              <th style={{ textAlign: "right", width: 90 }}>Saldo</th>
+              <th style={{ textAlign: "right", width: 90 }}>OC Sug.</th>
+              <th style={{ textAlign: "right", width: 110 }}>Valor OC</th>
             </tr>
           </thead>
           <tbody>
             {loading
-              ? Array.from({ length: 10 }).map((_, i) => <SkeletonRow key={i} cols={8} />)
+              ? Array.from({ length: 10 }).map((_, i) => <SkeletonRow key={i} cols={9} />)
               : filtered.flatMap(item => {
-                  const saldo  = saldoFerramenta(item);
-                  const isOpen = expanded === item.cpd_ferramenta;
+                  const saldo   = saldoFerramenta(item);
+                  const ocSug   = compraSugeridaFerramenta(item);
+                  const isOpen  = expanded === item.cpd_ferramenta;
                   const drill  = drillMap[item.cpd_ferramenta];
                   const isLoading = drilling === item.cpd_ferramenta;
 
@@ -509,7 +571,7 @@ function FerramentasListTab({
                       <td>
                         <code style={{ fontSize: "0.8rem", color: "var(--muted)" }}>{item.cpd_ferramenta}</code>
                       </td>
-                      <td style={{ maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                      <td style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
                           title={item.descricao || undefined}>
                         {item.codigo_fabricante || item.descricao || "—"}
                       </td>
@@ -557,8 +619,32 @@ function FerramentasListTab({
                         {fmt(item.ocs_abertas)}
                       </td>
                       <td style={{ textAlign: "right", fontWeight: 600 }}>{fmt(item.estoque_atual)}</td>
+                      <td style={{ textAlign: "right", color: "var(--muted)", fontSize: "0.8rem", whiteSpace: "nowrap" }}>
+                        {fmtData(item.data_ultimo_inventario)}
+                      </td>
                       <td style={{ textAlign: "right" }}>
                         <SaldoCell value={saldo} />
+                      </td>
+                      <td style={{ textAlign: "right" }}>
+                        {ocSug != null ? (
+                          <span style={{ color: "var(--warning)", fontWeight: 600 }}>
+                            {ocSug.toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 4 })}
+                          </span>
+                        ) : (
+                          <span style={{ color: "var(--muted)" }}>—</span>
+                        )}
+                      </td>
+                      <td style={{ textAlign: "right" }}>
+                        {ocSug != null && item.preco_compra > 0 ? (
+                          <span style={{ color: "var(--text)", fontWeight: 600 }}>
+                            <span style={{ color: "var(--muted)", fontWeight: 400, marginRight: 2, fontSize: "0.75rem" }}>
+                              {(item.moeda || "BRL").toUpperCase() === "USD" ? "US$" : "R$"}
+                            </span>
+                            {(ocSug * item.preco_compra).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </span>
+                        ) : (
+                          <span style={{ color: "var(--muted)" }}>—</span>
+                        )}
                       </td>
                     </tr>
                   );
@@ -567,7 +653,7 @@ function FerramentasListTab({
 
                   const drillRow = (
                     <tr key={`drill-${item.cpd_ferramenta}`} className="drill-row">
-                      <td colSpan={9}>
+                      <td colSpan={11}>
                         <div className="drill-inner">
                           {isLoading ? (
                             <p style={{ color: "var(--muted)", padding: "10px 0", fontSize: "0.83rem" }}>Carregando terminais...</p>
@@ -649,7 +735,7 @@ function SemFerramentaTab() {
     i =>
       i.cpd_materia_prima.toLowerCase().includes(search.toLowerCase()) ||
       (i.codigo_fabricante || "").toLowerCase().includes(search.toLowerCase()) ||
-      (i.subgrupo || "").toLowerCase().includes(search.toLowerCase())
+      (i.descricao || "").toLowerCase().includes(search.toLowerCase())
   );
 
   const groups: { subgrupo: string; itens: SemFerramentaItem[] }[] = [];
@@ -683,9 +769,19 @@ function SemFerramentaTab() {
             {allCollapsed ? "Expandir todos" : "Recolher todos"}
           </button>
         )}
-        <span style={{ color: "var(--muted)", fontSize: "0.82rem" }}>
+        <span style={{ color: "var(--muted)", fontSize: "0.82rem", flex: 1 }}>
           {loading ? "…" : `${filtered.length} materiais · ${groups.length} subgrupos`}
         </span>
+        {!loading && filtered.length > 0 && (
+          <button
+            className="btn-ghost"
+            style={{ fontSize: "0.82rem", whiteSpace: "nowrap" }}
+            onClick={() => exportarSemFerramentaXlsx(filtered)}
+            title={search ? `Exportar ${filtered.length} itens filtrados` : "Exportar todos para Excel"}
+          >
+            ↓ Exportar Excel {search ? `(${filtered.length})` : ""}
+          </button>
+        )}
       </div>
       {error && <p className="error-text">{error}</p>}
       <div className="table-card">
@@ -694,7 +790,8 @@ function SemFerramentaTab() {
             <tr>
               <th style={{ width: 32 }} />
               <th>CPD</th>
-              <th>Cod. Fabricante</th>
+              <th>Cód. Fabricante</th>
+              <th>Descrição</th>
               <th style={{ textAlign: "right" }}>Consumo Mensal</th>
               <th style={{ textAlign: "right" }}>Historico/mes</th>
               <th style={{ textAlign: "right" }}>Pendente/mes</th>
@@ -712,7 +809,7 @@ function SemFerramentaTab() {
                       <td style={{ textAlign: "center", paddingLeft: 8 }}>
                         <button className="expand-btn" tabIndex={-1}>{isOpen ? "▾" : "▸"}</button>
                       </td>
-                      <td colSpan={2} style={{ fontWeight: 600, color: "var(--text)", fontSize: "0.82rem", letterSpacing: "0.03em" }}>
+                      <td colSpan={3} style={{ fontWeight: 600, color: "var(--text)", fontSize: "0.82rem", letterSpacing: "0.03em" }}>
                         {subgrupo}
                         <span style={{ marginLeft: 10, color: "var(--muted)", fontWeight: 400, fontSize: "0.77rem" }}>
                           {itens.length} {itens.length === 1 ? "item" : "itens"}
@@ -729,7 +826,11 @@ function SemFerramentaTab() {
                     <tr key={item.cpd_materia_prima}>
                       <td />
                       <td><code style={{ fontSize: "0.8rem", color: "var(--muted)" }}>{item.cpd_materia_prima}</code></td>
-                      <td style={{ color: "var(--muted)", fontSize: "0.82rem" }}>{item.codigo_fabricante || "—"}</td>
+                      <td style={{ fontSize: "0.82rem" }}>{item.codigo_fabricante || "—"}</td>
+                      <td style={{ maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: "0.82rem", color: "var(--muted)" }}
+                          title={item.descricao || undefined}>
+                        {item.descricao || "—"}
+                      </td>
                       <td style={{ textAlign: "right", color: "var(--muted)" }}>
                         <ConsumoTooltip
                           consumo_mensal={item.consumo_mensal}
@@ -763,11 +864,12 @@ function SemFerramentaTab() {
 
 // ─── Page shell ───────────────────────────────────────────────────────────────
 
-type TabId = "lista" | "sem-config" | "sem-ferramenta" | "oc-ferramentas";
+type TabId = "lista" | "sem-config" | "sem-ferramenta" | "oc-ferramentas" | "disparo";
 
 export function FerramentasPage() {
-  const [tab, setTab]     = useState<TabId>("lista");
-  const [items, setItems] = useState<FerramentaResponse[]>([]);
+  const [tab, setTab]       = useState<TabId>("lista");
+  const [showSobre, setShowSobre] = useState(false);
+  const [items, setItems]   = useState<FerramentaResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState<string | null>(null);
 
@@ -787,24 +889,45 @@ export function FerramentasPage() {
     i => i.consumo_mensal > 0 && (i.usa_cobertura_padrao || i.leadtime_meses_calc === 0)
   ).length;
 
+  // Conta fornecedores únicos com OC pendente para badge em Pedidos de Compra
+  const ocFornCount = new Set(
+    items
+      .filter(i => compraSugeridaFerramenta(i) !== null)
+      .map(i => i.razao_social_fornecedor)
+      .filter(Boolean)
+  ).size;
+
   return (
     <div className="page">
       <div className="page-header">
-        <div>
-          <h1 className="page-title">Ferramentas</h1>
-          <p className="page-subtitle">Estoque e ordens de compra · BigQuery em tempo real</p>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div>
+            <h1 className="page-title">Ferramentas</h1>
+            <p className="page-subtitle">Estoque e ordens de compra · BigQuery em tempo real</p>
+          </div>
+          <SobreButton onClick={() => setShowSobre(true)} />
         </div>
+        <a
+          href="http://app.datateck.com.br:9092/toolguard/"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="btn-ghost"
+          style={{ fontSize: "0.82rem", textDecoration: "none" }}
+        >
+          ⚙ Tool Guard ↗
+        </a>
         <button className="btn-ghost" onClick={loadAll} style={{ fontSize: "0.82rem" }}>
           Atualizar
         </button>
       </div>
+      {showSobre && <SobreModal onClose={() => setShowSobre(false)} />}
 
       <div className="tab-bar">
         <button className={`tab-btn${tab === "lista" ? " active" : ""}`} onClick={() => setTab("lista")}>
-          Lista
+          Lista Geral
         </button>
         <button className={`tab-btn${tab === "sem-config" ? " active" : ""}`} onClick={() => setTab("sem-config")}>
-          Sem Config
+          Forn. Pendentes
           {!loading && semConfigCount > 0 && (
             <span style={{ marginLeft: 6, background: "var(--danger)", color: "#080808", borderRadius: 10, padding: "1px 6px", fontSize: "0.7rem", fontWeight: 600 }}>
               {semConfigCount}
@@ -812,10 +935,18 @@ export function FerramentasPage() {
           )}
         </button>
         <button className={`tab-btn${tab === "sem-ferramenta" ? " active" : ""}`} onClick={() => setTab("sem-ferramenta")}>
-          CPDs sem Ferramenta
+          Ferr. Pendentes
         </button>
         <button className={`tab-btn${tab === "oc-ferramentas" ? " active" : ""}`} onClick={() => setTab("oc-ferramentas")}>
-          OC Ferramentas
+          Pedidos de Compra
+          {!loading && ocFornCount > 0 && (
+            <span style={{ marginLeft: 6, background: "var(--warning, #f59e0b)", color: "#080808", borderRadius: 10, padding: "1px 6px", fontSize: "0.7rem", fontWeight: 600 }}>
+              {ocFornCount}
+            </span>
+          )}
+        </button>
+        <button className={`tab-btn${tab === "disparo" ? " active" : ""}`} onClick={() => setTab("disparo")}>
+          ✉ Disparo E-mail
         </button>
       </div>
 
@@ -827,6 +958,14 @@ export function FerramentasPage() {
           getPreview={() => OrdensCompraService.getPreviewFerramentas()}
           downloadExcel={() => OrdensCompraService.downloadExcelFerramentas()}
           titulo="OC Ferramentas"
+        />
+      )}
+      {tab === "disparo" && (
+        <DisparoTab
+          modulo="ferramentas"
+          descricao="Envia o Excel de OC de ferramentas para o operador ERP e um dashboard executivo com o valor estimado de compras para o gestor."
+          dispararFn={() => DisparoService.dispararFerramentas()}
+          getLogFn={() => DisparoService.getLog("ferramentas")}
         />
       )}
     </div>

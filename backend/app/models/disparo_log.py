@@ -7,6 +7,7 @@ class DisparoLog(Base):
 
     id                = Column(Integer, primary_key=True, index=True)
     tipo              = Column(String(20),  nullable=False, default="manual")   # manual | agendado
+    modulo            = Column(String(20),  nullable=False, default="insumos")  # insumos | ferramentas
     status            = Column(String(10),  nullable=False)                     # ok | erro
     email_operacional = Column(String(255), nullable=True)
     email_gestor      = Column(String(255), nullable=True)

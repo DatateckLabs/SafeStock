@@ -1,14 +1,19 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ParametrosService } from "../../services/ParametrosService";
-import { EstoquesMinimoService } from "../../services/EstoquesMinimoService";
-import { CriticidadesService } from "../../services/CriticidadesService";
 import { ConfigFornecedorService } from "../../services/ConfigFornecedorService";
 import { ConfigFerramentaService } from "../../services/ConfigFerramentaService";
 import { LoadingSpinner } from "../../components/LoadingSpinner";
-import type { ParametroGlobal, EstoqueMinimo, CriticidadeFerramenta, ConfigFornecedor, ConfigFerramenta } from "../../types";
+import type { ParametroGlobal, ConfigFornecedor, ConfigFerramenta } from "../../types";
 
-type Aba = "parametros" | "estoques" | "criticidades" | "fornecedores" | "ferramentas_cfg";
+const PARAMS_OCULTOS = new Set([
+  "smtp_host", "smtp_port", "smtp_user",
+  "email_operacional", "email_gestor",
+  "cron_dia_semana", "cron_hora", "cron_agendamentos",
+  "email_destino_oc",
+]);
+
+type Aba = "parametros" | "fornecedores" | "ferramentas_cfg" | "agendamento";
 
 export function CadastrosPage() {
   const [aba, setAba] = useState<Aba>("parametros");
@@ -24,10 +29,9 @@ export function CadastrosPage() {
       <div style={{ display: "flex", gap: 2, marginBottom: 20, borderBottom: "1px solid var(--border)", flexWrap: "wrap" }}>
         {([
           ["parametros",      "Parâmetros Globais"],
-          ["estoques",        "Estoque Mínimo"],
-          ["criticidades",    "Criticidade Ferramentas"],
           ["fornecedores",    "Fornecedores"],
           ["ferramentas_cfg", "Config. Ferramentas"],
+          ["agendamento",     "✉ Agendamento"],
         ] as [Aba, string][]).map(([id, label]) => (
           <button
             key={id}
@@ -51,10 +55,9 @@ export function CadastrosPage() {
       </div>
 
       {aba === "parametros"      && <TabParametros />}
-      {aba === "estoques"        && <TabEstoques />}
-      {aba === "criticidades"    && <TabCriticidades />}
       {aba === "fornecedores"    && <TabFornecedores />}
       {aba === "ferramentas_cfg" && <TabFerramentasCfg />}
+      {aba === "agendamento"     && <TabAgendamento />}
     </div>
   );
 }
@@ -95,7 +98,7 @@ function TabParametros() {
           <tr><th>Chave</th><th>Valor</th><th>Descrição</th><th>Ações</th></tr>
         </thead>
         <tbody>
-          {items.map(p => (
+          {items.filter(p => !PARAMS_OCULTOS.has(p.chave)).map(p => (
             <tr key={p.chave}>
               <td><code style={{ color: "var(--muted)", fontSize: "0.82rem" }}>{p.chave}</code></td>
               <td>
@@ -128,161 +131,6 @@ function TabParametros() {
             </tr>
           ))}
         </tbody>
-      </table>
-    </div>
-  );
-}
-
-function TabEstoques() {
-  const [items, setItems]     = useState<EstoqueMinimo[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [editing, setEditing] = useState<string | null>(null);
-  const [form, setForm]       = useState({ estoque_minimo: 0, estoque_maximo: 0, observacao: "" });
-  const [saving, setSaving]   = useState(false);
-
-  useEffect(() => {
-    EstoquesMinimoService.getAll().then(setItems).finally(() => setLoading(false));
-  }, []);
-
-  function startEdit(e: EstoqueMinimo) {
-    setEditing(e.cpd);
-    setForm({ estoque_minimo: e.estoque_minimo, estoque_maximo: e.estoque_maximo, observacao: e.observacao || "" });
-  }
-
-  async function salvar() {
-    if (!editing) return;
-    setSaving(true);
-    try {
-      const updated = await EstoquesMinimoService.upsert(editing, form);
-      setItems(prev => prev.map(e => e.cpd === editing ? updated : e));
-      setEditing(null);
-    } catch { alert("Erro ao salvar."); }
-    finally { setSaving(false); }
-  }
-
-  if (loading) return <LoadingSpinner />;
-
-  return (
-    <div className="table-card">
-      <table className="data-table">
-        <thead>
-          <tr><th>CPD</th><th>Mínimo</th><th>Máximo</th><th>Observação</th><th>Ações</th></tr>
-        </thead>
-        <tbody>
-          {items.map(e => (
-            <tr key={e.cpd}>
-              <td><code style={{ color: "var(--muted)", fontSize: "0.82rem" }}>{e.cpd}</code></td>
-              <td>
-                {editing === e.cpd
-                  ? <input className="form-input" type="number" step="0.01" value={form.estoque_minimo} onChange={x => setForm(f => ({ ...f, estoque_minimo: parseFloat(x.target.value) || 0 }))} />
-                  : e.estoque_minimo.toFixed(2)}
-              </td>
-              <td>
-                {editing === e.cpd
-                  ? <input className="form-input" type="number" step="0.01" value={form.estoque_maximo} onChange={x => setForm(f => ({ ...f, estoque_maximo: parseFloat(x.target.value) || 0 }))} />
-                  : e.estoque_maximo.toFixed(2)}
-              </td>
-              <td style={{ color: "var(--muted)", fontSize: "0.82rem" }}>
-                {editing === e.cpd
-                  ? <input className="form-input" value={form.observacao} onChange={x => setForm(f => ({ ...f, observacao: x.target.value }))} />
-                  : e.observacao || "—"}
-              </td>
-              <td>
-                {editing === e.cpd
-                  ? <>
-                    <button className="btn-primary btn-sm" onClick={salvar} disabled={saving}>{saving ? "..." : "Salvar"}</button>
-                    <button className="btn-ghost btn-sm" onClick={() => setEditing(null)}>Cancelar</button>
-                  </>
-                  : <button className="btn-ghost btn-sm" onClick={() => startEdit(e)}>Editar</button>}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {items.length === 0 && <p className="empty-state">Nenhum CPD cadastrado ainda. Use a tela de Insumos para adicionar.</p>}
-    </div>
-  );
-}
-
-function TabCriticidades() {
-  const [items, setItems]     = useState<CriticidadeFerramenta[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [editing, setEditing] = useState<string | null>(null);
-  const [form, setForm]       = useState({ criticidade: "media" as "alta" | "media" | "baixa", threshold_inatividade: "", observacao: "" });
-  const [saving, setSaving]   = useState(false);
-
-  useEffect(() => {
-    CriticidadesService.getAll().then(setItems).finally(() => setLoading(false));
-  }, []);
-
-  function startEdit(c: CriticidadeFerramenta) {
-    setEditing(c.cpd_ferramenta);
-    setForm({
-      criticidade: c.criticidade,
-      threshold_inatividade: c.threshold_inatividade != null ? String(c.threshold_inatividade) : "",
-      observacao: c.observacao || "",
-    });
-  }
-
-  async function salvar() {
-    if (!editing) return;
-    setSaving(true);
-    try {
-      const updated = await CriticidadesService.upsert(editing, {
-        criticidade: form.criticidade,
-        janela_consumo_dias: null,
-        threshold_inatividade: form.threshold_inatividade ? parseFloat(form.threshold_inatividade) : null,
-        observacao: form.observacao || undefined,
-      });
-      setItems(prev => prev.map(c => c.cpd_ferramenta === editing ? updated : c));
-      setEditing(null);
-    } catch { alert("Erro ao salvar."); }
-    finally { setSaving(false); }
-  }
-
-  if (loading) return <LoadingSpinner />;
-
-  return (
-    <div className="table-card">
-      <table className="data-table">
-        <thead>
-          <tr><th>CPD Ferramenta</th><th>Criticidade</th><th>Threshold inatividade</th><th>Obs.</th><th>Ações</th></tr>
-        </thead>
-        <tbody>
-          {items.map(c => (
-            <tr key={c.cpd_ferramenta}>
-              <td><code style={{ color: "var(--muted)", fontSize: "0.82rem" }}>{c.cpd_ferramenta}</code></td>
-              <td>
-                {editing === c.cpd_ferramenta
-                  ? <select className="filter-select" value={form.criticidade} onChange={e => setForm(f => ({ ...f, criticidade: e.target.value as "alta" | "media" | "baixa" }))}>
-                    <option value="alta">Alta</option>
-                    <option value="media">Média</option>
-                    <option value="baixa">Baixa</option>
-                  </select>
-                  : <span className={`badge ${c.criticidade === "alta" ? "badge-red" : c.criticidade === "media" ? "badge-yellow" : "badge-green"}`}>{c.criticidade}</span>}
-              </td>
-              <td>
-                {editing === c.cpd_ferramenta
-                  ? <input className="form-input" style={{ width: 80 }} type="number" value={form.threshold_inatividade} placeholder="global" onChange={e => setForm(f => ({ ...f, threshold_inatividade: e.target.value }))} />
-                  : c.threshold_inatividade ?? <em style={{ color: "var(--muted)" }}>global</em>}
-              </td>
-              <td style={{ fontSize: "0.82rem", color: "var(--muted)" }}>
-                {editing === c.cpd_ferramenta
-                  ? <input className="form-input" value={form.observacao} onChange={e => setForm(f => ({ ...f, observacao: e.target.value }))} />
-                  : c.observacao || "—"}
-              </td>
-              <td>
-                {editing === c.cpd_ferramenta
-                  ? <>
-                    <button className="btn-primary btn-sm" onClick={salvar} disabled={saving}>{saving ? "..." : "Salvar"}</button>
-                    <button className="btn-ghost btn-sm" onClick={() => setEditing(null)}>Cancelar</button>
-                  </>
-                  : <button className="btn-ghost btn-sm" onClick={() => startEdit(c)}>Editar</button>}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-        {items.length === 0 && <tr><td colSpan={5}><p className="empty-state">Nenhuma criticidade cadastrada.</p></td></tr>}
       </table>
     </div>
   );
@@ -519,13 +367,13 @@ function TabFornecedores() {
 
 // ─── Tab Config. Ferramentas ──────────────────────────────────────────────────
 
-const FORM_CFG_EMPTY = { cpd_ferramenta: "", aplicacoes: "80000", leadtime_override: "" };
+const FORM_CFG_EMPTY = { cpd_ferramenta: "", leadtime_override: "" };
 
 function TabFerramentasCfg() {
   const [items, setItems]     = useState<ConfigFerramenta[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<string | null>(null);
-  const [form, setForm]       = useState({ aplicacoes: "80000", leadtime_override: "" });
+  const [form, setForm]       = useState({ leadtime_override: "" });
   const [adding, setAdding]   = useState(false);
   const [newForm, setNewForm] = useState(FORM_CFG_EMPTY);
   const [saving, setSaving]   = useState(false);
@@ -536,17 +384,14 @@ function TabFerramentasCfg() {
 
   function startEdit(c: ConfigFerramenta) {
     setEditing(c.cpd_ferramenta);
-    setForm({
-      aplicacoes:        String(c.aplicacoes),
-      leadtime_override: c.leadtime_override != null ? String(c.leadtime_override) : "",
-    });
+    setForm({ leadtime_override: c.leadtime_override != null ? String(c.leadtime_override) : "" });
   }
 
   async function salvar(cpd: string) {
     setSaving(true);
     try {
       const updated = await ConfigFerramentaService.upsert(cpd, {
-        aplicacoes:        parseInt(form.aplicacoes)   || 80_000,
+        aplicacoes: 80_000,
         leadtime_override: form.leadtime_override !== "" ? parseFloat(form.leadtime_override) : null,
       });
       setItems(prev => prev.map(c => c.cpd_ferramenta === cpd ? updated : c));
@@ -560,7 +405,7 @@ function TabFerramentasCfg() {
     setSaving(true);
     try {
       const created = await ConfigFerramentaService.upsert(newForm.cpd_ferramenta.trim(), {
-        aplicacoes:        parseInt(newForm.aplicacoes)   || 80_000,
+        aplicacoes: 80_000,
         leadtime_override: newForm.leadtime_override !== "" ? parseFloat(newForm.leadtime_override) : null,
       });
       setItems(prev => [...prev, created].sort((a, b) => a.cpd_ferramenta.localeCompare(b.cpd_ferramenta)));
@@ -584,7 +429,7 @@ function TabFerramentasCfg() {
     <div className="table-card">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <p style={{ color: "var(--muted)", fontSize: "0.82rem", margin: 0 }}>
-          Sobrescreve o leadtime do fornecedor por ferramenta. Aplicações default: 80.000.
+          Exceção de leadtime por ferramenta — sobrescreve o valor do fornecedor. Durabilidade gerenciada pelo ToolGuard.
         </p>
         {!adding && (
           <button className="btn-primary btn-sm" onClick={() => setAdding(true)}>+ Adicionar</button>
@@ -594,7 +439,6 @@ function TabFerramentasCfg() {
         <thead>
           <tr>
             <th>CPD Ferramenta</th>
-            <th style={{ textAlign: "right" }}>Aplicações</th>
             <th style={{ textAlign: "right" }}>Leadtime override (meses)</th>
             <th>Ações</th>
           </tr>
@@ -603,11 +447,6 @@ function TabFerramentasCfg() {
           {items.map(c => (
             <tr key={c.cpd_ferramenta}>
               <td><code style={{ color: "var(--muted)", fontSize: "0.82rem" }}>{c.cpd_ferramenta}</code></td>
-              <td style={{ textAlign: "right" }}>
-                {editing === c.cpd_ferramenta
-                  ? <input className="form-input" style={{ width: 90, textAlign: "right" }} type="number" min="1" value={form.aplicacoes} onChange={e => setForm(f => ({ ...f, aplicacoes: e.target.value }))} />
-                  : c.aplicacoes.toLocaleString("pt-BR")}
-              </td>
               <td style={{ textAlign: "right" }}>
                 {editing === c.cpd_ferramenta
                   ? <input className="form-input" style={{ width: 70, textAlign: "right" }} type="number" step="0.5" min="0" placeholder="do fornecedor" value={form.leadtime_override} onChange={e => setForm(f => ({ ...f, leadtime_override: e.target.value }))} />
@@ -634,9 +473,6 @@ function TabFerramentasCfg() {
                 <input className="form-input" placeholder="CPD da ferramenta" value={newForm.cpd_ferramenta} onChange={e => setNewForm(f => ({ ...f, cpd_ferramenta: e.target.value }))} style={{ width: 120 }} />
               </td>
               <td style={{ textAlign: "right" }}>
-                <input className="form-input" style={{ width: 90, textAlign: "right" }} type="number" min="1" value={newForm.aplicacoes} onChange={e => setNewForm(f => ({ ...f, aplicacoes: e.target.value }))} />
-              </td>
-              <td style={{ textAlign: "right" }}>
                 <input className="form-input" style={{ width: 70, textAlign: "right" }} type="number" step="0.5" min="0" placeholder="do fornecedor" value={newForm.leadtime_override} onChange={e => setNewForm(f => ({ ...f, leadtime_override: e.target.value }))} />
               </td>
               <td>
@@ -647,7 +483,240 @@ function TabFerramentasCfg() {
           )}
         </tbody>
       </table>
-      {items.length === 0 && !adding && <p className="empty-state">Nenhuma ferramenta configurada. Clique em "+ Adicionar".</p>}
+      {items.length === 0 && !adding && <p className="empty-state">Nenhuma exceção de leadtime cadastrada. Clique em "+ Adicionar".</p>}
+    </div>
+  );
+}
+
+// ─── Tab Agendamento ──────────────────────────────────────────────────────────
+
+const DIAS_SEMANA = [
+  { value: "mon", label: "Segunda-feira" },
+  { value: "tue", label: "Terça-feira" },
+  { value: "wed", label: "Quarta-feira" },
+  { value: "thu", label: "Quinta-feira" },
+  { value: "fri", label: "Sexta-feira" },
+  { value: "sat", label: "Sábado" },
+  { value: "sun", label: "Domingo" },
+];
+
+const AGENDAMENTO_KEYS = [
+  "smtp_host", "smtp_port", "smtp_user",
+  "email_operacional", "email_gestor",
+  "cron_dia_semana", "cron_hora", "cron_agendamentos",
+];
+
+function Section({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div style={{ marginBottom: 28 }}>
+      <h3 style={{ margin: "0 0 12px", fontSize: "0.9rem", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>{title}</h3>
+      <div style={{ display: "grid", gap: 14 }}>{children}</div>
+    </div>
+  );
+}
+
+function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "200px 1fr", alignItems: "start", gap: 12 }}>
+      <div>
+        <div style={{ fontSize: "0.88rem", color: "var(--text)", fontWeight: 600, marginBottom: 2 }}>{label}</div>
+        {hint && <div style={{ fontSize: "0.78rem", color: "var(--muted)", lineHeight: 1.4 }}>{hint}</div>}
+      </div>
+      <div>{children}</div>
+    </div>
+  );
+}
+
+type AgendamentoEntry = { dia: string; hora: string };
+
+function TabAgendamento() {
+  const [vals, setVals]           = useState<Record<string, string>>({});
+  const [loading, setLoading]     = useState(true);
+  const [saving, setSaving]       = useState<string | null>(null);
+  const [saved, setSaved]         = useState<string | null>(null);
+  const [agendamentos, setAgendamentos] = useState<AgendamentoEntry[]>([{ dia: "mon", hora: "08:00" }]);
+  const [savingAg, setSavingAg]   = useState(false);
+  const [savedAg, setSavedAg]     = useState(false);
+
+  useEffect(() => {
+    ParametrosService.getAll().then(items => {
+      const map: Record<string, string> = {};
+      items.forEach(p => { if (AGENDAMENTO_KEYS.includes(p.chave)) map[p.chave] = p.valor; });
+      setVals(map);
+
+      const agRaw = map["cron_agendamentos"];
+      if (agRaw) {
+        try {
+          const parsed = JSON.parse(agRaw);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setAgendamentos(parsed as AgendamentoEntry[]);
+            return;
+          }
+        } catch { /* continua para fallback */ }
+      }
+      // fallback para parâmetros legados
+      if (map["cron_dia_semana"]) {
+        setAgendamentos([{ dia: map["cron_dia_semana"], hora: map["cron_hora"] ?? "08:00" }]);
+      }
+    }).finally(() => setLoading(false));
+  }, []);
+
+  async function salvar(chave: string, valor: string) {
+    setSaving(chave);
+    setSaved(null);
+    try {
+      await ParametrosService.update(chave, valor);
+      setVals(prev => ({ ...prev, [chave]: valor }));
+      setSaved(chave);
+      setTimeout(() => setSaved(null), 2000);
+    } catch {
+      alert("Erro ao salvar.");
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  async function salvarAgendamentos() {
+    setSavingAg(true);
+    try {
+      await ParametrosService.update("cron_agendamentos", JSON.stringify(agendamentos));
+      setSavedAg(true);
+      setTimeout(() => setSavedAg(false), 2500);
+    } catch {
+      alert("Erro ao salvar agendamentos.");
+    } finally {
+      setSavingAg(false);
+    }
+  }
+
+  function updateEntry(idx: number, field: "dia" | "hora", value: string) {
+    setAgendamentos(prev => prev.map((e, i) => i === idx ? { ...e, [field]: value } : e));
+  }
+
+  function addEntry() {
+    setAgendamentos(prev => [...prev, { dia: "mon", hora: "08:00" }]);
+  }
+
+  function removeEntry(idx: number) {
+    setAgendamentos(prev => prev.filter((_, i) => i !== idx));
+  }
+
+  if (loading) return <LoadingSpinner />;
+
+  return (
+    <div style={{ maxWidth: 640 }}>
+      <Section title="SMTP — Servidor de e-mail">
+        <Field label="Servidor (smtp_host)" hint="Ex: smtp.gmail.com">
+          <SaveInput chave="smtp_host" value={vals["smtp_host"] ?? ""} onSave={salvar} saving={saving} saved={saved} placeholder="smtp.gmail.com" />
+        </Field>
+        <Field label="Porta (smtp_port)">
+          <SaveInput chave="smtp_port" value={vals["smtp_port"] ?? "587"} onSave={salvar} saving={saving} saved={saved} placeholder="587" />
+        </Field>
+        <Field label="Usuário (smtp_user)" hint="E-mail que faz o envio">
+          <SaveInput chave="smtp_user" value={vals["smtp_user"] ?? ""} onSave={salvar} saving={saving} saved={saved} placeholder="usuario@empresa.com.br" />
+        </Field>
+        <Field label="Senha (SMTP_PASSWORD)" hint="Configurar via variável de ambiente no .env do backend">
+          <div style={{ fontSize: "0.83rem", color: "var(--muted)", padding: "8px 0" }}>
+            Defina <code style={{ background: "var(--surface2)", padding: "2px 6px", borderRadius: 4 }}>SMTP_PASSWORD=sua_senha</code> no arquivo <code style={{ background: "var(--surface2)", padding: "2px 6px", borderRadius: 4 }}>backend/.env</code> e reinicie o backend.
+          </div>
+        </Field>
+      </Section>
+
+      <Section title="Destinatários">
+        <Field label="E-mail operacional" hint="Recebe o Excel de OC para importar no ERP">
+          <SaveInput chave="email_operacional" value={vals["email_operacional"] ?? ""} onSave={salvar} saving={saving} saved={saved} placeholder="operador@empresa.com.br" />
+        </Field>
+        <Field label="E-mail gestor" hint="Recebe o dashboard executivo com valor estimado">
+          <SaveInput chave="email_gestor" value={vals["email_gestor"] ?? ""} onSave={salvar} saving={saving} saved={saved} placeholder="gestor@empresa.com.br" />
+        </Field>
+      </Section>
+
+      <Section title="Agendamento automático">
+        <div style={{ display: "grid", gap: 8 }}>
+          {agendamentos.map((ag, idx) => (
+            <div key={idx} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <select
+                className="filter-select"
+                value={ag.dia}
+                onChange={e => updateEntry(idx, "dia", e.target.value)}
+                style={{ minWidth: 160 }}
+              >
+                {DIAS_SEMANA.map(d => <option key={d.value} value={d.value}>{d.label}</option>)}
+              </select>
+              <input
+                type="time"
+                className="form-input"
+                value={ag.hora}
+                onChange={e => updateEntry(idx, "hora", e.target.value)}
+                style={{ width: 110 }}
+              />
+              {agendamentos.length > 1 && (
+                <button
+                  className="btn-ghost"
+                  style={{ color: "var(--danger)", fontSize: "0.82rem", padding: "4px 8px" }}
+                  onClick={() => removeEntry(idx)}
+                  title="Remover este agendamento"
+                >
+                  Remover
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 4 }}>
+          <button
+            className="btn-ghost"
+            style={{ fontSize: "0.82rem" }}
+            onClick={addEntry}
+          >
+            + Adicionar horário
+          </button>
+          <button
+            className="btn-primary btn-sm"
+            onClick={salvarAgendamentos}
+            disabled={savingAg}
+          >
+            {savingAg ? "Salvando..." : savedAg ? "✓ Salvo" : "Salvar agendamentos"}
+          </button>
+        </div>
+
+        <div style={{ padding: "10px 14px", background: "rgba(255,193,7,0.08)", border: "1px solid rgba(255,193,7,0.3)", borderRadius: 6, fontSize: "0.82rem", color: "var(--muted)" }}>
+          ⚠️ Alterações no agendamento só têm efeito após reiniciar o backend (o cron é lido na inicialização).
+        </div>
+      </Section>
+    </div>
+  );
+}
+
+function SaveInput({
+  chave, value, onSave, saving, saved, placeholder,
+}: {
+  chave: string; value: string; onSave: (k: string, v: string) => void;
+  saving: string | null; saved: string | null; placeholder?: string;
+}) {
+  const [local, setLocal] = useState(value);
+  useEffect(() => { setLocal(value); }, [value]);
+  const dirty = local !== value;
+
+  return (
+    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+      <input
+        className="form-input"
+        style={{ flex: 1 }}
+        value={local}
+        onChange={e => setLocal(e.target.value)}
+        placeholder={placeholder}
+        onKeyDown={e => { if (e.key === "Enter") onSave(chave, local); }}
+      />
+      <button
+        className="btn-primary btn-sm"
+        onClick={() => onSave(chave, local)}
+        disabled={saving === chave || !dirty}
+        style={{ minWidth: 64 }}
+      >
+        {saving === chave ? "..." : saved === chave ? "✓" : "Salvar"}
+      </button>
     </div>
   );
 }

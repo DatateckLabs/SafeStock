@@ -6,6 +6,7 @@ from pydantic import BaseModel
 class DisparoLogResponse(BaseModel):
     id: int
     tipo: str
+    modulo: str
     status: str
     email_operacional: Optional[str]
     email_gestor: Optional[str]

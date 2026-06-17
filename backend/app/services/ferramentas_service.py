@@ -109,7 +109,8 @@ async def get_ferramentas(db: Session) -> list[FerramentaResponse]:
         cfg_f    = cfg_ferramenta_map.get(cpd_ferramenta)
         cfg_forn = cfg_fornecedor_map.get(razao_social)
 
-        aplicacoes = float(cfg_f.aplicacoes) if cfg_f and cfg_f.aplicacoes else 80_000.0
+        durabilidade_bq = float(rows[0].get("DURABILIDADE_BTD") or 0)
+        aplicacoes = durabilidade_bq if durabilidade_bq > 0 else 80_000.0
 
         # Leadtime (em meses): override manual > BQ LEADTIME_SEMANAS > config fornecedor
         lt_bq_semanas = float(mrp.get("LEADTIME_SEMANAS") or 0)
@@ -164,6 +165,9 @@ async def get_ferramentas(db: Session) -> list[FerramentaResponse]:
             num_terminais=len(rows),
             razao_social_fornecedor=str(mrp.get("RAZAO_SOCIAL_FORNECEDOR") or ""),
             unidade=str(mrp.get("UN__MEDIDA") or ""),
+            data_ultimo_inventario=str(mrp.get("DATA_ULTIMO_INVENTARIO_ESTOQUE") or "") or None,
+            preco_compra=float(mrp.get("PRE_O_COMPRA") or 0),
+            moeda=str(mrp.get("MOEDA") or "BRL"),
         ))
 
     results.sort(key=lambda f: f.estoque_atual - f.estoque_minimo_calculado)
@@ -206,6 +210,7 @@ async def get_sem_ferramenta(db: Session) -> list[SemFerramentaItem]:
         SemFerramentaItem(
             cpd_materia_prima=str(r.get("CPD_MATERIA_PRIMA") or ""),
             codigo_fabricante=str(r.get("CODIGO_FABRICANTE") or "") or None,
+            descricao=str(r.get("DESCRICAO_COMPLEMENTAR") or "") or None,
             subgrupo=str(r.get("SUBGRUPO") or "") or None,
             produzido_total=float(r.get("produzido_total") or 0),
             pendente_total=float(r.get("pendente_total") or 0),

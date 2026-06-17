@@ -17,3 +17,19 @@ class InsumoResponse(BaseModel):
     unidade: str | None
     razao_social_fornecedor: str | None
     quantidade_pendente_oc: float
+    consumo_mensal: float = 0.0
+    consumo_historico_mensal: float = 0.0
+    consumo_pendente_mensal: float = 0.0
+    mrp_auto: str | None = None
+    data_ultimo_inventario: str | None = None
+    preco_compra: float = 0.0
+    moeda: str | None = None
+
+
+class InsumoChicoteItem(BaseModel):
+    descricao_produto: str | None
+    cliente: str | None
+    consumo_mensal: float
+    consumo_historico_mensal: float
+    consumo_pendente_mensal: float
+    meses_total: int

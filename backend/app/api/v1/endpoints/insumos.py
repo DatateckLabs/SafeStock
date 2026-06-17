@@ -5,8 +5,8 @@ from app.core.auth_middleware import get_current_user, require_role, CurrentUser
 from app.db.session import get_db
 from app.models.estoque_minimo import EstoqueMinimo
 from app.schemas.estoque_minimo import EstoqueMinimoUpsert, EstoqueMinimoResponse
-from app.schemas.insumo import InsumoResponse
-from app.services.insumos_service import get_insumos
+from app.schemas.insumo import InsumoResponse, InsumoChicoteItem
+from app.services.insumos_service import get_insumos, get_insumo_drilldown
 
 router = APIRouter(prefix="/insumos", tags=["insumos"])
 
@@ -17,6 +17,14 @@ async def listar(
     _: CurrentUser = Depends(get_current_user),
 ):
     return await get_insumos(db)
+
+
+@router.get("/{cpd}/drilldown/", response_model=list[InsumoChicoteItem])
+async def drilldown(
+    cpd: str,
+    _: CurrentUser = Depends(get_current_user),
+):
+    return await get_insumo_drilldown(cpd)
 
 
 @router.put("/{cpd}/estoque/", response_model=EstoqueMinimoResponse)

@@ -28,11 +28,15 @@ class FerramentaResponse(BaseModel):
     num_terminais: int               # quantos CPDs de terminal usam esta ferramenta
     razao_social_fornecedor: str | None
     unidade: str | None
+    data_ultimo_inventario: str | None = None
+    preco_compra: float = 0.0
+    moeda: str | None = None
 
 
 class SemFerramentaItem(BaseModel):
     cpd_materia_prima:        str
     codigo_fabricante:        str | None
+    descricao:                str | None
     subgrupo:                 str | None
     consumo_mensal:           float
     consumo_historico_mensal: float

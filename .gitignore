@@ -1,6 +1,9 @@
 .env
 _backup/
 credentials/
+desktop.ini
+disparos/
+*.bak
 *-creds.json
 *-key.json
 *_key.json

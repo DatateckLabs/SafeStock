@@ -1,9 +1,14 @@
 import { api } from "./api";
-import type { InsumoResponse, EstoqueMinimo } from "../types";
+import type { InsumoResponse, InsumoChicoteItem, EstoqueMinimo } from "../types";
 
 export class InsumosService {
   static async getAll(): Promise<InsumoResponse[]> {
     const { data } = await api.get<InsumoResponse[]>("/api/v1/insumos/");
+    return data;
+  }
+
+  static async getDrilldown(cpd: string): Promise<InsumoChicoteItem[]> {
+    const { data } = await api.get<InsumoChicoteItem[]>(`/api/v1/insumos/${cpd}/drilldown/`);
     return data;
   }
 

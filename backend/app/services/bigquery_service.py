@@ -1,7 +1,10 @@
+import logging
 import os
 from google.cloud import bigquery
 from google.oauth2 import service_account
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 _client: bigquery.Client | None = None
 
@@ -52,7 +55,11 @@ def get_insumos(subgrupos: list[str]) -> list[dict]:
         UN__MEDIDA,
         RAZAO_SOCIAL_FORNECEDOR,
         COALESCE(SAFE_CAST(QUANTIDADE_PENDENTE_OC AS FLOAT64), 0.0) AS QUANTIDADE_PENDENTE_OC,
-        INATIVO
+        INATIVO,
+        MRO_AUTO,
+        DATA_ULTIMO_INVENTARIO_ESTOQUE,
+        COALESCE(SAFE_CAST(PRE_O_COMPRA AS FLOAT64), 0.0) AS PRE_O_COMPRA,
+        COALESCE(MOEDA, 'BRL') AS MOEDA
     FROM `bi-datateck.delphus_staging.Parametros_MRP_sem_duplicidade`
     WHERE SUBGRUPO IN UNNEST(@subgrupos)
         AND (INATIVO IS NULL OR INATIVO != 'S')
@@ -92,7 +99,10 @@ def get_parametros_mrp_por_cpds(cpds: list[str]) -> list[dict]:
         COALESCE(SAFE_CAST(MPQ AS FLOAT64), 0.0) AS MPQ,
         UN__MEDIDA,
         RAZAO_SOCIAL_FORNECEDOR,
-        COALESCE(SAFE_CAST(QUANTIDADE_PENDENTE_OC AS FLOAT64), 0.0) AS QUANTIDADE_PENDENTE_OC
+        COALESCE(SAFE_CAST(QUANTIDADE_PENDENTE_OC AS FLOAT64), 0.0) AS QUANTIDADE_PENDENTE_OC,
+        DATA_ULTIMO_INVENTARIO_ESTOQUE,
+        COALESCE(SAFE_CAST(PRE_O_COMPRA AS FLOAT64), 0.0) AS PRE_O_COMPRA,
+        COALESCE(MOEDA, 'BRL') AS MOEDA
     FROM `bi-datateck.delphus_staging.Parametros_MRP_sem_duplicidade`
     WHERE CAST(CAST(SAFE_CAST(CPD AS FLOAT64) AS INT64) AS STRING) IN UNNEST(@cpds)
     """
@@ -128,7 +138,11 @@ def get_ferramentas_consumo() -> list[dict]:
         GROUP BY CPD_MATERIA_PRIMA, mes_ano
     ),
     tg_base AS (
-        SELECT CPD, CPD_FERRAMENTA, ANY_VALUE(FERRAMENTA) AS FERRAMENTA
+        SELECT
+            CPD,
+            CPD_FERRAMENTA,
+            ANY_VALUE(FERRAMENTA) AS FERRAMENTA,
+            ANY_VALUE(SAFE_CAST(DURABILIDADE_BTD AS FLOAT64)) AS DURABILIDADE_BTD
         FROM `bi-datateck.Silver.ToolGuard`
         WHERE CPD_FERRAMENTA IS NOT NULL
         GROUP BY CPD, CPD_FERRAMENTA
@@ -147,6 +161,7 @@ def get_ferramentas_consumo() -> list[dict]:
     SELECT
         tg.CPD_FERRAMENTA,
         tg.FERRAMENTA,
+        tg.DURABILIDADE_BTD,
         ot.produzido_mp,
         ot.pendente_mp,
         ot.meses_produzido,
@@ -315,6 +330,104 @@ def get_consumo_por_mes_terminal(cpd_materia_prima: str) -> list[dict]:
     return [dict(row) for row in client.query(query, job_config=job_config).result()]
 
 
+def get_insumos_consumo(cpds: list[str]) -> list[dict]:
+    """Consumo mensal (histórico + pendente) para uma lista de CPDs de insumo.
+
+    Usa SAFE_CAST para não quebrar em CPD_MATERIA_PRIMA não-numérico.
+    Normaliza via FLOAT64→INT64 para corresponder ao padrão de outros queries.
+    """
+    if not cpds:
+        return []
+    client = _get_client()
+    query = """
+    WITH normalized AS (
+        SELECT
+            CAST(SAFE_CAST(SAFE_CAST(CPD_MATERIA_PRIMA AS FLOAT64) AS INT64) AS STRING) AS cpd_norm,
+            FORMAT_DATE('%Y-%m', DATE(SAFE_CAST(ENTREGA_PEDIDO AS TIMESTAMP))) AS mes_ano,
+            COALESCE(PRODUZIDO_OP, 0) * COALESCE(QUANTIDADE_MP_COMPOSICAO, 0) AS produzido_un,
+            GREATEST(
+                COALESCE(QUANTIDADE_OP, 0)
+                - COALESCE(PRODUZIDO_OP, 0)
+                - COALESCE(CANCELADO_OP, 0),
+                0
+            ) * COALESCE(QUANTIDADE_MP_COMPOSICAO, 0) AS pendente_un
+        FROM `bi-datateck.delphus_staging.ordens_de_producao_por_mes`
+        WHERE TIPO_PEDIDO != 'SIMULAÇÃO DE PROJETOS'
+          AND SAFE_CAST(CPD_MATERIA_PRIMA AS FLOAT64) IS NOT NULL
+    ),
+    filtrado AS (
+        SELECT cpd_norm, mes_ano,
+               SUM(produzido_un) AS produzido_mes,
+               SUM(pendente_un)  AS pendente_mes
+        FROM normalized
+        WHERE cpd_norm IN UNNEST(@cpds)
+        GROUP BY cpd_norm, mes_ano
+    )
+    SELECT
+        cpd_norm                                        AS CPD_MATERIA_PRIMA,
+        SUM(produzido_mes)                              AS produzido_total,
+        SUM(pendente_mes)                               AS pendente_total,
+        COUNTIF(produzido_mes > 0)                      AS meses_produzido,
+        COUNTIF(pendente_mes > 0)                       AS meses_pendente,
+        COUNTIF(produzido_mes > 0 OR pendente_mes > 0) AS meses_total
+    FROM filtrado
+    GROUP BY cpd_norm
+    """
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[bigquery.ArrayQueryParameter("cpds", "STRING", cpds)]
+    )
+    try:
+        rows = [dict(row) for row in client.query(query, job_config=job_config).result()]
+        logger.info("get_insumos_consumo: %d linhas para %d CPDs", len(rows), len(cpds))
+        return rows
+    except Exception as exc:
+        logger.exception("get_insumos_consumo ERRO: %s", exc)
+        raise
+
+
+def get_insumo_drilldown(cpd: str) -> list[dict]:
+    """Produtos (chicotes) que consomem o insumo, agrupados por produto e cliente."""
+    client = _get_client()
+    query = """
+    WITH raw AS (
+        SELECT
+            COALESCE(CODIGO_FABRICANTE_PRODUTO_ACABA, CAST(CPD_PRODUTO_ACABADO AS STRING), '(sem descrição)') AS descricao_produto,
+            COALESCE(CLIENTE, '') AS cliente,
+            FORMAT_DATE('%Y-%m', DATE(SAFE_CAST(ENTREGA_PEDIDO AS TIMESTAMP))) AS mes_ano,
+            SUM(COALESCE(PRODUZIDO_OP, 0) * COALESCE(QUANTIDADE_MP_COMPOSICAO, 0)) AS produzido_mes,
+            SUM(
+                GREATEST(
+                    COALESCE(QUANTIDADE_OP, 0)
+                    - COALESCE(PRODUZIDO_OP, 0)
+                    - COALESCE(CANCELADO_OP, 0),
+                    0
+                ) * COALESCE(QUANTIDADE_MP_COMPOSICAO, 0)
+            ) AS pendente_mes
+        FROM `bi-datateck.delphus_staging.ordens_de_producao_por_mes`
+        WHERE CAST(SAFE_CAST(SAFE_CAST(CPD_MATERIA_PRIMA AS FLOAT64) AS INT64) AS STRING) = @cpd
+          AND TIPO_PEDIDO != 'SIMULAÇÃO DE PROJETOS'
+        GROUP BY descricao_produto, cliente, mes_ano
+    )
+    SELECT
+        descricao_produto,
+        cliente,
+        SUM(produzido_mes)                              AS produzido_total,
+        SUM(pendente_mes)                               AS pendente_total,
+        COUNTIF(produzido_mes > 0)                      AS meses_produzido,
+        COUNTIF(pendente_mes > 0)                       AS meses_pendente,
+        COUNTIF(produzido_mes > 0 OR pendente_mes > 0) AS meses_total
+    FROM raw
+    GROUP BY descricao_produto, cliente
+    HAVING produzido_total > 0 OR pendente_total > 0
+    ORDER BY SAFE_DIVIDE(produzido_total + pendente_total, NULLIF(meses_total, 0)) DESC
+    LIMIT 50
+    """
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[bigquery.ScalarQueryParameter("cpd", "STRING", cpd)]
+    )
+    return [dict(row) for row in client.query(query, job_config=job_config).result()]
+
+
 def get_sem_ferramenta(subgrupos_excluir: list[str] | None = None) -> list[dict]:
     """Materiais com consumo > 0 que não possuem vínculo na ToolGuard."""
     client = _get_client()
@@ -356,6 +469,7 @@ def get_sem_ferramenta(subgrupos_excluir: list[str] | None = None) -> list[dict]
     SELECT
         ops.CPD_MATERIA_PRIMA,
         mrp.CODIGO_FABRICANTE,
+        mrp.DESCRICAO_COMPLEMENTAR,
         mrp.SUBGRUPO,
         ops.produzido_total,
         ops.pendente_total,
@@ -438,12 +552,12 @@ def get_precos_por_cpds(cpds: list[str]) -> dict[str, dict]:
     query = """
     SELECT
         CAST(CAST(SAFE_CAST(CPD AS FLOAT64) AS INT64) AS STRING) AS cpd_norm,
-        COALESCE(SAFE_CAST(PRECO_UNITARIO AS FLOAT64), 0.0) AS preco,
+        COALESCE(SAFE_CAST(PRE_O_COMPRA AS FLOAT64), 0.0) AS preco,
         COALESCE(MOEDA, 'BRL') AS moeda
     FROM `bi-datateck.delphus_staging.Parametros_MRP_sem_duplicidade`
     WHERE CAST(CAST(SAFE_CAST(CPD AS FLOAT64) AS INT64) AS STRING) IN UNNEST(@cpds)
-        AND PRECO_UNITARIO IS NOT NULL
-        AND SAFE_CAST(PRECO_UNITARIO AS FLOAT64) > 0
+        AND PRE_O_COMPRA IS NOT NULL
+        AND SAFE_CAST(PRE_O_COMPRA AS FLOAT64) > 0
     """
     job_config = bigquery.QueryJobConfig(
         query_parameters=[bigquery.ArrayQueryParameter("cpds", "STRING", cpds)]

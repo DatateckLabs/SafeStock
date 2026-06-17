@@ -397,8 +397,9 @@ async def get_preview_oc_ferramentas(db: Session) -> PreviewOCResponse:
     )
 
 
-def _gerar_excel_bytes(fornecedores: list[PreviewFornecedorOC], tipo_col: str) -> bytes:
-    """Preenche o template Delphus com os itens e retorna os bytes do xlsx."""
+def _gerar_excel_bytes(fornecedores: list[PreviewFornecedorOC], tipo_col: str) -> tuple[bytes, list[dict]]:
+    """Preenche o template Delphus. Itens com CPD inválido ou sem ID de fornecedor são
+    bloqueados do Excel e retornados como alertas para exibição no dashboard."""
     wb = openpyxl.load_workbook(str(_TEMPLATE_PATH))
     ws = wb.active
 
@@ -406,13 +407,23 @@ def _gerar_excel_bytes(fornecedores: list[PreviewFornecedorOC], tipo_col: str) -
         for col_idx in range(1, ws.max_column + 1):
             ws.cell(row=row_idx, column=col_idx).value = None
 
+    alertas: list[dict] = []
     row_idx = 2
     for forn in fornecedores:
         for item in forn.itens:
+            cpd = str(item.cpd)
+            if not cpd.isdigit():
+                alertas.append({"cpd": cpd, "fornecedor": forn.razao_social,
+                                 "motivo": "CPD não numérico — bloqueado do Excel"})
+                continue
+            if forn.id_fornecedor is None:
+                alertas.append({"cpd": cpd, "fornecedor": forn.razao_social,
+                                 "motivo": "Fornecedor sem ID no ERP — bloqueado do Excel"})
+                continue
             entrega = date.fromisoformat(item.data_entrega)
             ws.cell(row=row_idx, column=1).value = forn.id_fornecedor
-            ws.cell(row=row_idx, column=2).value = int(item.cpd) if item.cpd.isdigit() else item.cpd
-            ws.cell(row=row_idx, column=3).value = int(item.qtd_sugerida)
+            ws.cell(row=row_idx, column=2).value = int(cpd)
+            ws.cell(row=row_idx, column=3).value = math.ceil(item.qtd_sugerida)
             ws.cell(row=row_idx, column=4).value = entrega
             ws.cell(row=row_idx, column=4).number_format = "DD/MM/YYYY"
             ws.cell(row=row_idx, column=5).value = tipo_col
@@ -421,16 +432,18 @@ def _gerar_excel_bytes(fornecedores: list[PreviewFornecedorOC], tipo_col: str) -
 
     buf = io.BytesIO()
     wb.save(buf)
-    return buf.getvalue()
+    return buf.getvalue(), alertas
 
 
-async def gerar_excel_oc_insumos(db: Session) -> tuple[bytes, str]:
+async def gerar_excel_oc_insumos(db: Session) -> tuple[bytes, str, list[dict]]:
     fornecedores, _ = await _build_preview_fornecedores(db)
     filename = f"OC_Insumos_{date.today().strftime('%Y%m%d')}.xlsx"
-    return _gerar_excel_bytes(fornecedores, "INSUMO"), filename
+    excel_bytes, alertas = _gerar_excel_bytes(fornecedores, "INSUMO")
+    return excel_bytes, filename, alertas
 
 
-async def gerar_excel_oc_ferramentas(db: Session) -> tuple[bytes, str]:
+async def gerar_excel_oc_ferramentas(db: Session) -> tuple[bytes, str, list[dict]]:
     fornecedores, _ = await _build_preview_fornecedores_ferramentas(db)
     filename = f"OC_Ferramentas_{date.today().strftime('%Y%m%d')}.xlsx"
-    return _gerar_excel_bytes(fornecedores, "FERRAMENTA"), filename
+    excel_bytes, alertas = _gerar_excel_bytes(fornecedores, "FERRAMENTA")
+    return excel_bytes, filename, alertas

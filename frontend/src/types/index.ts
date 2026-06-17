@@ -23,6 +23,22 @@ export interface InsumoResponse {
   unidade: string | null;
   razao_social_fornecedor: string | null;
   quantidade_pendente_oc: number;
+  consumo_mensal: number;
+  consumo_historico_mensal: number;
+  consumo_pendente_mensal: number;
+  mrp_auto: string | null;
+  data_ultimo_inventario: string | null;
+  preco_compra: number;
+  moeda: string | null;
+}
+
+export interface InsumoChicoteItem {
+  descricao_produto: string | null;
+  cliente: string | null;
+  consumo_mensal: number;
+  consumo_historico_mensal: number;
+  consumo_pendente_mensal: number;
+  meses_total: number;
 }
 
 export interface DrilldownItem {
@@ -64,11 +80,15 @@ export interface FerramentaResponse {
   num_terminais: number;
   razao_social_fornecedor: string | null;
   unidade: string | null;
+  data_ultimo_inventario: string | null;
+  preco_compra: number;
+  moeda: string | null;
 }
 
 export interface SemFerramentaItem {
   cpd_materia_prima:        string;
   codigo_fabricante:        string | null;
+  descricao:                string | null;
   subgrupo:                 string | null;
   consumo_mensal:           number;
   consumo_historico_mensal: number;
@@ -218,6 +238,7 @@ export interface UserProfile {
 export interface DisparoLog {
   id: number;
   tipo: "manual" | "agendado";
+  modulo: "insumos" | "ferramentas";
   status: "ok" | "erro";
   email_operacional: string | null;
   email_gestor: string | null;

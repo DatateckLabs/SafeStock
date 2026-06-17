@@ -3,6 +3,23 @@ set "BASE=c:\Projetos\SafeStock"
 
 echo.
 echo =======================================
+echo   SafeStock - Parando servicos antigos
+echo =======================================
+
+REM Mata processos antigos nas portas 8000 e 8001 para evitar acumulo
+echo Liberando porta 8000...
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":8000 " ^| findstr "LISTENING"') do (
+    taskkill /F /PID %%a >nul 2>&1
+)
+echo Liberando porta 8001...
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":8001 " ^| findstr "LISTENING"') do (
+    taskkill /F /PID %%a >nul 2>&1
+)
+
+timeout /t 2 /nobreak >nul
+
+echo.
+echo =======================================
 echo   SafeStock - Iniciando servicos...
 echo =======================================
 echo.
@@ -29,7 +46,7 @@ start "" http://localhost:5173
 
 echo.
 echo =======================================
-echo   Tudo rodando!
+echo   Tudo chuchu beleza!
 echo   Frontend : http://localhost:5173
 echo   API docs : http://localhost:8000/docs
 echo   Auth docs: http://localhost:8001/docs

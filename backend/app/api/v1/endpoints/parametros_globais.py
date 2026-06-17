@@ -38,10 +38,12 @@ async def atualizar(
 ):
     obj = db.query(ParametroGlobal).filter(ParametroGlobal.chave == chave).first()
     if not obj:
-        raise HTTPException(status_code=404, detail="Parâmetro não encontrado.")
-    obj.valor = payload.valor
-    if payload.descricao is not None:
-        obj.descricao = payload.descricao
+        obj = ParametroGlobal(chave=chave, valor=payload.valor, descricao=payload.descricao)
+        db.add(obj)
+    else:
+        obj.valor = payload.valor
+        if payload.descricao is not None:
+            obj.descricao = payload.descricao
     db.commit()
     db.refresh(obj)
     return obj
